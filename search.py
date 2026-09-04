@@ -8,6 +8,10 @@
              Если в окружении есть HH_TOKEN - работаем через api.hh.ru.
   habr     - career.habr.com, разбор карточек выдачи.
   getmatch - getmatch.ru, открытый JSON со свежими офферами.
+  geekjob  - geekjob.ru, обход ленты (поиск по адресу сайт игнорирует).
+  itone    - it-one.ru, вакансии одной компании.
+  superjob - только через официальный API (SUPERJOB_KEY): обычные
+             страницы поиска отдают капчу.
   tg       - телеграм-каналы (нужны api_id/api_hash, см. tg_source.py).
 
 Каждый источник возвращает список словарей одного вида:
@@ -49,6 +53,10 @@ HH_WORK_FORMAT = {"REMOTE": "remote", "HYBRID": "hybrid", "ON_SITE": "office"}
 # hh отдаёт 429, если долбить его десятком параллельных запросов
 HH_LIMIT = asyncio.Semaphore(2)
 HH_PAUSE = 0.7
+
+# Сколько страниц выдачи забирать с hh на каждый запрос: страница = 50
+# самых свежих вакансий, одной страницы на широкие запросы не хватало.
+HH_PAGES = int(os.getenv("HH_PAGES", "3"))
 
 
 async def _hh_get(client, url, params, headers):
@@ -326,6 +334,189 @@ async def fetch_getmatch(client, limit=100, pages=2):
     return out
 
 
+# ----------------------------------------------------------------- geekjob
+
+GEEKJOB_PAGES = 5
+# Сколько вакансий догружаем ради даты публикации: в списке её нет.
+GEEKJOB_DETAILS = 12
+GEEKJOB_ITEM = re.compile(r'<li class="collection-item.*?</li>', re.S)
+GEEKJOB_TITLE = re.compile(r'class="title"[^>]*>(.*?)</a>', re.S)
+GEEKJOB_HREF = re.compile(r'href="(/vacancy/[0-9a-f]+)"')
+GEEKJOB_COMPANY = re.compile(r'company-name"[^>]*>\s*<a[^>]*>(.*?)</a>', re.S)
+GEEKJOB_SALARY = re.compile(r'class="salary">(.*?)</span>', re.S)
+GEEKJOB_DATE = re.compile(r'"datePosted"\s*:\s*"([^"]+)"')
+
+
+async def fetch_geekjob(client, queries):
+    """geekjob.ru — вакансии в IT и digital.
+
+    Поисковые параметры в адресе сайт игнорирует (на ?q=... приходит тот же
+    общий список), поэтому обходим ленту и отбираем по названию сами.
+    """
+    words = [w.lower() for q in queries for w in re.split(r"\s+", q) if len(w) > 2]
+    out, seen = [], set()
+
+    for page in range(1, GEEKJOB_PAGES + 1):
+        try:
+            resp = await client.get("https://geekjob.ru/vacancies",
+                                    params={"page": page}, headers={"User-Agent": UA})
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("geekjob: страница %s не открылась: %s", page, exc)
+            break
+
+        chunks = GEEKJOB_ITEM.findall(resp.text)
+        if not chunks:
+            break
+
+        for chunk in chunks:
+            href = GEEKJOB_HREF.search(chunk)
+            title_m = GEEKJOB_TITLE.search(chunk)
+            if not href or not title_m:
+                continue
+            title = _strip_tags(title_m.group(1))
+            if words and not any(w in title.lower() for w in words):
+                continue
+            url = "https://geekjob.ru" + href.group(1)
+            if url in seen:
+                continue
+            seen.add(url)
+
+            salary_m = GEEKJOB_SALARY.search(chunk)
+            salary_text = _strip_tags(salary_m.group(1)) if salary_m else ""
+            company_m = GEEKJOB_COMPANY.search(chunk)
+            out.append({
+                "uid": "geekjob:" + href.group(1).rsplit("/", 1)[-1],
+                "source": "geekjob",
+                "ext_id": href.group(1).rsplit("/", 1)[-1],
+                "title": title,
+                "company": _strip_tags(company_m.group(1)) if company_m else "",
+                "area": "",
+                "url": url,
+                "published_at": None,
+                "salary_from": _num(salary_text) if salary_text else None,
+                "salary_to": None,
+                "currency": "RUR",
+                "work_format": "",
+                "experience": "",
+            })
+
+    for item in out[:GEEKJOB_DETAILS]:
+        try:
+            page = await client.get(item["url"], headers={"User-Agent": UA})
+            m = GEEKJOB_DATE.search(page.text)
+            if m:
+                item["published_at"] = _to_iso(m.group(1))
+        except Exception:
+            pass  # дата приятна, но терять из-за неё вакансию не станем
+    return out
+
+
+# ------------------------------------------------------------------- IT_One
+
+ITONE_TITLE = re.compile(r"<h3>(.*?)</h3>", re.S)
+ITONE_HREF = re.compile(r'href="(/vacancies/[0-9a-f]+/)"')
+ITONE_CITY = re.compile(r'class="city">(.*?)</span>', re.S)
+
+
+async def fetch_itone(client, queries):
+    """Вакансии IT_One (it-one.ru) — это одна компания, а не агрегатор.
+
+    Дат публикации на сайте нет, поэтому такие вакансии проходят фильтр
+    свежести как «без даты».
+    """
+    words = [w.lower() for q in queries for w in re.split(r"\s+", q) if len(w) > 2]
+    try:
+        resp = await client.get("https://www.it-one.ru/vacancies/",
+                                headers={"User-Agent": UA})
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("it-one: страница не открылась: %s", exc)
+        return []
+
+    # Карточки режем по началу блока: внутри вложенные div, и подобрать
+    # закрывающий тег регуляркой надёжно не выйдет.
+    out = []
+    for chunk in resp.text.split('<div class="element">')[1:]:
+        title_m = ITONE_TITLE.search(chunk)
+        href_m = ITONE_HREF.search(chunk)
+        if not title_m or not href_m:
+            continue
+        title = _strip_tags(title_m.group(1))
+        if words and not any(w in title.lower() for w in words):
+            continue
+        city_m = ITONE_CITY.search(chunk)
+        city = _strip_tags(city_m.group(1)) if city_m else ""
+        vid = href_m.group(1).strip("/").rsplit("/", 1)[-1]
+        out.append({
+            "uid": "itone:" + vid,
+            "source": "itone",
+            "ext_id": vid,
+            "title": title,
+            "company": "IT_One",
+            "area": city,
+            "url": "https://www.it-one.ru" + href_m.group(1),
+            "published_at": None,
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "RUR",
+            "work_format": "remote" if re.search(r"remote|удал", city, re.I) else "",
+            "experience": "",
+        })
+    return out
+
+
+# ----------------------------------------------------------------- superjob
+
+SUPERJOB_KEY = os.getenv("SUPERJOB_KEY", "").strip()
+
+
+async def fetch_superjob(client, query, period_days=30, count=100):
+    """superjob.ru — только через официальный API.
+
+    Обычные страницы поиска отдают капчу, обходить её мы не будем. Ключ
+    бесплатный: регистрация приложения на https://api.superjob.ru/register
+    и переменная окружения SUPERJOB_KEY.
+    """
+    if not SUPERJOB_KEY:
+        return []
+    try:
+        resp = await client.get(
+            "https://api.superjob.ru/2.0/vacancies/",
+            params={"keyword": query, "count": count, "order_field": "date",
+                    "period": period_days},
+            headers={"X-Api-App-Id": SUPERJOB_KEY, "User-Agent": UA},
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("superjob: запрос не удался: %s", exc)
+        return []
+
+    out = []
+    for raw in resp.json().get("objects", []):
+        vid = str(raw.get("id"))
+        place = (raw.get("town") or {}).get("title") or ""
+        out.append({
+            "uid": "superjob:" + vid,
+            "source": "superjob",
+            "ext_id": vid,
+            "title": raw.get("profession") or "",
+            "company": raw.get("firm_name") or "",
+            "area": place,
+            "url": raw.get("link") or "",
+            "published_at": _to_iso(
+                datetime.fromtimestamp(raw["date_published"], MSK).isoformat()
+                if raw.get("date_published") else None
+            ),
+            "salary_from": raw.get("payment_from") or None,
+            "salary_to": raw.get("payment_to") or None,
+            "currency": (raw.get("currency") or "rub").upper().replace("RUB", "RUR"),
+            "work_format": "remote" if raw.get("place_of_work", {}).get("id") == 2 else "",
+            "experience": "",
+        })
+    return out
+
+
 # -------------------------------------------------------------------- сборка
 
 REMOTE_IN_TITLE = re.compile(
@@ -438,15 +629,24 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         if "hh" in sources:
             for q in hh_queries:
-                tasks.append(fetch_hh(client, q, area=area, period=period))
+                # Несколько страниц: hh отдаёт по 50 самых свежих на страницу,
+                # и на широких запросах всё остальное просто терялось.
+                tasks.append(fetch_hh(client, q, area=area, period=period, pages=HH_PAGES))
                 # отдельный проход по удалёнке: широкие запросы иначе
                 # обрезаются по 50 самых свежих, и remote в них не попадает
-                tasks.append(fetch_hh(client, q, area=area, period=period, remote=True))
+                tasks.append(fetch_hh(client, q, area=area, period=period,
+                                      pages=HH_PAGES, remote=True))
         if "habr" in sources:
             tasks += [fetch_habr(client, q) for q in habr_queries]
             tasks += [fetch_habr(client, q, remote=True) for q in habr_queries]
         if "getmatch" in sources:
             tasks.append(fetch_getmatch(client))
+        if "geekjob" in sources:
+            tasks.append(fetch_geekjob(client, habr_queries))
+        if "itone" in sources:
+            tasks.append(fetch_itone(client, habr_queries))
+        if "superjob" in sources and SUPERJOB_KEY:
+            tasks += [fetch_superjob(client, q) for q in habr_queries]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Телеграм-каналы читаются отдельно: они ходят не через httpx, а через

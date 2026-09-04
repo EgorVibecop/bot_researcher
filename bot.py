@@ -66,7 +66,8 @@ MAIN_MENU = ReplyKeyboardMarkup(
 REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санкт-Петербург"}
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
 SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch",
-                "tg": "Telegram"}
+                "tg": "Telegram", "geekjob": "Geekjob",
+                "itone": "IT_One", "superjob": "SuperJob"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "hybrid": "гибрид", "office": "офис"}
 WORK_FORMAT_ORDER = ["remote", "hybrid", "office"]
