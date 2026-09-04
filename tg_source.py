@@ -1,40 +1,47 @@
 """
-Вакансии из телеграм-каналов.
+Вакансии из телеграм-каналов — через публичную веб-версию канала.
 
-Ограничение платформы: бот не может читать канал, в котором он не
-администратор. Поэтому каналы читаются от имени обычного аккаунта через
-Telethon — для этого нужны api_id и api_hash с https://my.telegram.org
-и однократный вход по телефону (создаётся файл сессии).
+Читаем https://t.me/s/<канал> — ту же страницу, что открывается в браузере
+у любого прохожего. Ни аккаунта, ни api_id, ни файла сессии не нужно.
 
-Переменные окружения:
-    TG_API_ID, TG_API_HASH — с my.telegram.org
-    TG_CHANNELS            — каналы через запятую: @hr_jobs,@ux_vacancies
-    TG_SESSION             — имя файла сессии (по умолчанию tg_reader)
+Почему не Telethon: он читает каналы от имени обычного аккаунта, а значит
+на сервер пришлось бы положить файл сессии — это полный доступ к аккаунту
+(читать переписки, писать от вашего имени). Ради публичных каналов такой
+размен не нужен.
 
-Если переменные не заданы, источник просто выключен и остальные работают
-как обычно.
+Ограничение подхода: так видны только публичные каналы с включённым
+предпросмотром. Закрытые и те, где предпросмотр выключен, не читаются —
+для них аккаунт всё же обязателен.
 
-Формат возвращаемых словарей тот же, что у остальных источников
-(см. шапку search.py), чтобы склейка дублей и оформление карточки
-работали одинаково для всех.
+Каналы задаются переменной окружения TG_CHANNELS через запятую:
+    TG_CHANNELS=@ux_jobs,@researcher_jobs
+
+Формат возвращаемых словарей — общий для всех источников (см. search.py).
 """
 
 import asyncio
+import html as html_mod
 import logging
 import os
 import re
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-# Сколько последних сообщений просматриваем в каждом канале.
-SCAN_LIMIT = 200
+MSK = timezone(timedelta(hours=3))
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+# Одна страница предпросмотра отдаёт последние ~20 постов.
+_BLOCK = re.compile(r'data-post="([^"]+)"(.*?)(?=data-post="|\Z)', re.S)
+_TEXT = re.compile(r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', re.S)
+_DATE = re.compile(r'<time datetime="([^"]+)"')
 
 _HASHTAG = re.compile(r"#\S+")
 _LEADING_JUNK = re.compile(r"^[\W_]+", re.U)
-_VACANCY_HINT = re.compile(
-    r"вакансия|ищем|требуется|в поиске|hiring|we are looking|открыта позиция", re.I
-)
 _SALARY_LABELLED = re.compile(
     r"(?:з/?п|зарплата|salary|доход|вилка|оклад)\s*[:\-—]?\s*([^\n]{3,60})", re.I
 )
@@ -49,20 +56,14 @@ _HYBRID = re.compile(r"гибрид|hybrid|частично удал", re.I)
 _OFFICE = re.compile(r"\bофис|on-?site|в офисе", re.I)
 
 
-def configured():
-    """Настроен ли источник."""
-    if not (os.getenv("TG_API_ID") and os.getenv("TG_API_HASH") and channels()):
-        return False
-    try:
-        import telethon  # noqa: F401
-    except ImportError:
-        logger.warning("TG_API_ID задан, но telethon не установлен")
-        return False
-    return True
-
-
 def channels():
-    return [c.strip() for c in os.getenv("TG_CHANNELS", "").split(",") if c.strip()]
+    return [c.strip().lstrip("@") for c in os.getenv("TG_CHANNELS", "").split(",")
+            if c.strip()]
+
+
+def configured():
+    """Источник работает, как только заданы каналы — ключи не нужны."""
+    return bool(channels())
 
 
 def _work_format(text):
@@ -85,13 +86,20 @@ def _title(text):
     return ""
 
 
+def _int(text):
+    digits = re.sub(r"\D", "", text or "")
+    if not digits:
+        return None
+    value = int(digits)
+    # «250к» и «250 тыс» в постах означают тысячи.
+    return value * 1000 if value < 1000 else value
+
+
 def _salary(text):
-    """Вытащить зарплату. Возвращает (from, to) — как у остальных источников."""
-    chunk = None
+    """Зарплата из поста. Возвращает (from, to) — как у остальных источников."""
     m = _SALARY_LABELLED.search(text)
-    if m:
-        chunk = m.group(1)
-    else:
+    chunk = m.group(1) if m else None
+    if not chunk:
         m = _MONEY.search(text)
         chunk = m.group(0) if m else None
     if not chunk:
@@ -111,85 +119,82 @@ def _salary(text):
     return value, value
 
 
-def _int(text):
-    digits = re.sub(r"\D", "", text or "")
-    if not digits:
-        return None
-    value = int(digits)
-    # «250к» и «250 тыс» в постах означают тысячи.
-    return value * 1000 if value < 1000 else value
+def _post_text(chunk):
+    """Текст поста: собираем все блоки, <br> превращаем в переводы строк."""
+    parts = _TEXT.findall(chunk)
+    if not parts:
+        return ""
+    raw = "\n".join(parts)
+    raw = re.sub(r"<br\s*/?>", "\n", raw)
+    raw = re.sub(r"</?(p|div)[^>]*>", "\n", raw)
+    text = html_mod.unescape(re.sub(r"<[^>]+>", "", raw))
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-async def fetch_telegram(queries, limit_per_channel=30):
-    """Собрать вакансии из настроенных каналов по списку запросов."""
-    if not configured():
-        return []
-
-    from telethon import TelegramClient
-
-    api_id = int(os.getenv("TG_API_ID"))
-    api_hash = os.getenv("TG_API_HASH")
-    session = os.getenv("TG_SESSION", "tg_reader")
-
-    words = [q.lower() for q in queries if q]
+def parse_channel_page(html, channel, words):
+    """Разобрать страницу предпросмотра канала в список вакансий."""
     out = []
-
-    client = TelegramClient(session, api_id, api_hash)
-    try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            logger.warning(
-                "Телеграм-источник не авторизован: нужен однократный вход "
-                "по телефону, чтобы создать файл сессии"
-            )
-            return []
-        for channel in channels():
-            try:
-                out += await _read_channel(client, channel, words, limit_per_channel)
-            except Exception as exc:
-                logger.warning("канал %s не прочитан: %s", channel, exc)
-    finally:
-        await client.disconnect()
-    return out
-
-
-async def _read_channel(client, channel, words, limit):
-    found = []
-    async for message in client.iter_messages(channel, limit=SCAN_LIMIT):
-        text = message.message or ""
-        if not text.strip():
+    for post_id, chunk in _BLOCK.findall(html):
+        text = _post_text(chunk)
+        if not text:
             continue
-        low = text.lower()
-        if words and not any(w in low for w in words):
-            continue
-        if not _VACANCY_HINT.search(text) and not words:
+        if words and not any(w in text.lower() for w in words):
             continue
 
         title = _title(text)
         if not title:
             continue
 
-        published = message.date
-        if published and published.tzinfo is None:
-            published = published.replace(tzinfo=timezone.utc)
+        published = None
+        date_m = _DATE.search(chunk)
+        if date_m:
+            try:
+                published = datetime.fromisoformat(date_m.group(1)).astimezone(
+                    MSK).isoformat(timespec="seconds")
+            except ValueError:
+                published = None
 
-        handle = channel.lstrip("@")
         salary_from, salary_to = _salary(text)
-        found.append({
-            "uid": f"tg:{handle}:{message.id}",
+        out.append({
+            "uid": "tg:" + post_id,
             "source": "tg",
-            "ext_id": str(message.id),
+            "ext_id": post_id,
             "title": title,
             "company": "",
             "area": "",
-            "url": f"https://t.me/{handle}/{message.id}",
-            "published_at": published.isoformat() if published else None,
+            "url": "https://t.me/" + post_id,
+            "published_at": published,
             "salary_from": salary_from,
             "salary_to": salary_to,
             "currency": "RUR",
             "work_format": _work_format(text),
             "experience": "",
         })
-        if len(found) >= limit:
-            break
-    return found
+    return out
+
+
+async def fetch_telegram(client, queries):
+    """Собрать вакансии из публичных каналов, указанных в TG_CHANNELS."""
+    chans = channels()
+    if not chans:
+        return []
+
+    words = [w.lower() for q in queries for w in re.split(r"\s+", q) if len(w) > 2]
+    out = []
+    for channel in chans:
+        try:
+            resp = await client.get(f"https://t.me/s/{channel}",
+                                    headers={"User-Agent": UA})
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("телеграм: канал @%s не прочитан: %s", channel, exc)
+            continue
+
+        found = parse_channel_page(resp.text, channel, words)
+        if not found and "tgme_widget_message" not in resp.text:
+            logger.warning(
+                "телеграм: у @%s нет публичного предпросмотра — "
+                "закрытые каналы так не читаются", channel
+            )
+        out += found
+    return out

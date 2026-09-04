@@ -647,15 +647,9 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
             tasks.append(fetch_itone(client, habr_queries))
         if "superjob" in sources and SUPERJOB_KEY:
             tasks += [fetch_superjob(client, q) for q in habr_queries]
+        if "tg" in sources and tg_source.configured():
+            tasks.append(tg_source.fetch_telegram(client, habr_queries))
         results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Телеграм-каналы читаются отдельно: они ходят не через httpx, а через
-    # собственный клиент, и включаются только если заданы api_id/api_hash.
-    if "tg" in sources and tg_source.configured():
-        try:
-            results = list(results) + [await tg_source.fetch_telegram(hh_queries)]
-        except Exception as exc:
-            logger.warning("телеграм-источник упал: %s", exc)
 
     seen, out = {}, []
     for res in results:
