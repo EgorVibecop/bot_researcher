@@ -4,3 +4,7 @@ __pycache__/
 venv/
 *.db
 bot_log.txt
+
+# Файл сессии Telethon — это доступ к аккаунту, ему в репозитории не место.
+*.session
+*.session-journal

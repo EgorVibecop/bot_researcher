@@ -65,7 +65,8 @@ MAIN_MENU = ReplyKeyboardMarkup(
 
 REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санкт-Петербург"}
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
-SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch"}
+SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch",
+                "tg": "Telegram"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "hybrid": "гибрид", "office": "офис"}
 WORK_FORMAT_ORDER = ["remote", "hybrid", "office"]
@@ -120,21 +121,31 @@ def format_vacancy(vac):
     lines = [head]
     if second:
         lines.append(" · ".join(second))
-    money_text = salary_line(vac)
-    if money_text:
-        lines.append("💰 " + money_text)
+    # Зарплату пишем всегда: её отсутствие — тоже информация о вакансии.
+    lines.append("💰 " + (salary_line(vac) or "не указана"))
+
     tail = []
     if vac.get("experience"):
         tail.append("опыт: " + vac["experience"])
     tail.append(vac.get("published_at", "")[:10])
-    tail.append(SOURCE_NAMES.get(vac.get("source"), vac.get("source", "")))
     lines.append("🧭 " + " · ".join(t for t in tail if t))
 
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("Открыть вакансию", url=vac["url"]),
-        InlineKeyboardButton("🚫 Скрыть компанию", callback_data="mute:" + vac["uid"]),
-    ]])
-    return "\n".join(lines), keyboard
+    # Одна вакансия может висеть сразу на нескольких сервисах — тогда
+    # у карточки будет несколько ссылок, по одной на каждый.
+    links = vac.get("links") or [(vac.get("source", ""), vac.get("url", ""))]
+    seen_urls, buttons = set(), []
+    for source, url in links:
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        label = SOURCE_NAMES.get(source, source) or "Открыть"
+        buttons.append(InlineKeyboardButton(label, url=url))
+
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton("🚫 Скрыть компанию", callback_data="mute:" + vac["uid"])
+    ])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
 # ------------------------------------------------------------------ сбор

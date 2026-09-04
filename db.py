@@ -23,7 +23,7 @@ DB_PATH = Path(os.getenv("DB_PATH") or (Path(__file__).parent / "jobs.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CATEGORIES = "ux,cx,product,marketing,socio,research"
-DEFAULT_SOURCES = "hh,habr,getmatch"
+DEFAULT_SOURCES = "hh,habr,getmatch,tg"
 
 DEFAULT_WORK_FORMATS = "remote"     # remote | hybrid | office, через запятую
 

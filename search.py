@@ -8,6 +8,7 @@
              Если в окружении есть HH_TOKEN - работаем через api.hh.ru.
   habr     - career.habr.com, разбор карточек выдачи.
   getmatch - getmatch.ru, открытый JSON со свежими офферами.
+  tg       - телеграм-каналы (нужны api_id/api_hash, см. tg_source.py).
 
 Каждый источник возвращает список словарей одного вида:
   uid, source, ext_id, title, company, area, url, published_at (ISO),
@@ -23,6 +24,8 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
+
+import tg_source
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +332,97 @@ REMOTE_IN_TITLE = re.compile(
     r"удал[её]нн|удал[её]нка|дистанцион|\bremote\b|work\s*from\s*home", re.IGNORECASE)
 
 
+# Вакансии старше этого срока не показываем.
+MAX_AGE_DAYS = 92
+
+# Мусор в названии, который мешает опознать одну и ту же вакансию на разных
+# сайтах: уточнения в скобках, грейд, слово «вакансия».
+_TITLE_NOISE = re.compile(r"\(.*?\)|\[.*?\]|\bвакансия\b", re.I)
+_GRADE = re.compile(
+    r"\b(junior|middle|senior|lead|jun|mid|sr|jr|стажер|стажёр|младший|старший|ведущий)\b",
+    re.I,
+)
+_ORG_PREFIX = re.compile(r"\b(ооо|оао|зао|пао|ип|llc|ltd|inc|gmbh|corp|компания)\b", re.I)
+
+
+def _norm(text, drop_grade=False):
+    t = (text or "").lower().replace("ё", "е")
+    t = _TITLE_NOISE.sub(" ", t)
+    if drop_grade:
+        t = _GRADE.sub(" ", t)
+    else:
+        t = _ORG_PREFIX.sub(" ", t)
+    t = re.sub(r"[^a-zа-я0-9+#. ]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def merge_key(item):
+    """Ключ, по которому вакансия считается той же самой на разных сайтах."""
+    return _norm(item.get("title"), drop_grade=True) + "|" + _norm(item.get("company"))
+
+
+def is_fresh(item, max_age_days=MAX_AGE_DAYS, now=None):
+    """Не архивная и не старше max_age_days.
+
+    Вакансии без даты публикации оставляем: её не отдают телеграм-каналы,
+    и молча выбрасывать их значило бы терять часть выдачи.
+    """
+    if item.get("archived"):
+        return False
+    published = item.get("published_at")
+    if not published:
+        return True
+    try:
+        dt = datetime.fromisoformat(published)
+    except ValueError:
+        return True
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    age = ((now or datetime.now(timezone.utc)) - dt).total_seconds() / 86400
+    return age <= max_age_days
+
+
+def merge_duplicates(items):
+    """Склеить одну и ту же вакансию, найденную в разных сервисах.
+
+    Раньше дубли убирались только по uid, а он начинается с имени источника
+    («hh:123», «habr:456»), поэтому одна вакансия на hh и на Хабре приходила
+    дважды. Теперь такие карточки объединяются, а ссылки на все сервисы,
+    где вакансия нашлась, собираются в links.
+    """
+    merged, order = {}, []
+    for item in items:
+        item.setdefault("links", [(item.get("source", ""), item.get("url", ""))])
+        key = merge_key(item)
+        base = merged.get(key)
+        if base is None:
+            merged[key] = item
+            order.append(key)
+            continue
+
+        known = {url for _, url in base["links"]}
+        for src, url in item["links"]:
+            if url and url not in known:
+                base["links"].append((src, url))
+                known.add(url)
+
+        # Недостающие поля добираем из дубля: на одном сайте может быть
+        # указана зарплата или формат работы, а на другом нет.
+        for field in ("salary_from", "salary_to", "currency", "experience", "area", "company"):
+            if not base.get(field) and item.get(field):
+                base[field] = item[field]
+        formats = dict.fromkeys(
+            [f for f in (base.get("work_format") or "").split(",") if f]
+            + [f for f in (item.get("work_format") or "").split(",") if f]
+        )
+        base["work_format"] = ",".join(formats)
+        if item.get("published_at") and (
+            not base.get("published_at") or item["published_at"] < base["published_at"]
+        ):
+            base["published_at"] = item["published_at"]
+    return [merged[k] for k in order]
+
+
 def _augment_formats(item):
     """Если в названии написано «удалённо», а источник формат не отдал."""
     formats = [f for f in (item.get("work_format") or "").split(",") if f]
@@ -355,6 +449,14 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
             tasks.append(fetch_getmatch(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    # Телеграм-каналы читаются отдельно: они ходят не через httpx, а через
+    # собственный клиент, и включаются только если заданы api_id/api_hash.
+    if "tg" in sources and tg_source.configured():
+        try:
+            results = list(results) + [await tg_source.fetch_telegram(hh_queries)]
+        except Exception as exc:
+            logger.warning("телеграм-источник упал: %s", exc)
+
     seen, out = {}, []
     for res in results:
         if isinstance(res, Exception):
@@ -374,12 +476,32 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
                 continue
             seen[item["uid"]] = item
             out.append(_augment_formats(item))
-    out.sort(key=lambda v: v["published_at"], reverse=True)
+
+    out = merge_duplicates([v for v in out if is_fresh(v)])
+    out.sort(key=lambda v: v.get("published_at") or "", reverse=True)
     return out
 
 
 async def free_search(text, area=113, period=30, limit=10):
-    """Разовый поиск по произвольному запросу - для команды /search."""
+    """Разовый поиск по произвольному запросу - для команды /search.
+
+    Идёт сразу по нескольким источникам, чтобы одна вакансия, висящая
+    на hh и на Хабре, пришла одной карточкой со ссылками на оба.
+    """
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        items = await fetch_hh(client, text, area=area, period=period)
+        results = await asyncio.gather(
+            fetch_hh(client, text, area=area, period=period),
+            fetch_habr(client, text),
+            return_exceptions=True,
+        )
+
+    items = []
+    for res in results:
+        if isinstance(res, Exception):
+            logger.warning("источник упал при свободном поиске: %s", res)
+            continue
+        items += res
+
+    items = merge_duplicates([_augment_formats(v) for v in items if is_fresh(v)])
+    items.sort(key=lambda v: v.get("published_at") or "", reverse=True)
     return items[:limit]
