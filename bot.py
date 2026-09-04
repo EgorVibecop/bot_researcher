@@ -28,7 +28,7 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import Forbidden, TelegramError
+from telegram.error import Forbidden, NetworkError, TelegramError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -598,6 +598,20 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⏱ Интервал проверки: " + str(CHECK_INTERVAL_MINUTES) + " мин")
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Обрывы связи с Telegram - обычное дело, их логируем одной строкой.
+
+    Провайдеры любят рвать TLS-рукопожатие до api.telegram.org; библиотека
+    сама повторит запрос, поэтому простыня трейсбека тут ничего не даёт.
+    """
+    err = context.error
+    if isinstance(err, (NetworkError, TimedOut)):
+        logger.warning("связь с Telegram оборвалась (%s), повторю позже",
+                       type(err).__name__)
+        return
+    logger.error("не смог обработать обновление", exc_info=err)
+
+
 async def _post_init(app: Application):
     asyncio.create_task(poll_loop(app))
     await app.bot.set_my_commands([
@@ -622,7 +636,19 @@ def main():
 
     db.init_db()
 
-    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .connect_timeout(20)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(20)
+        .get_updates_connect_timeout(20)
+        .get_updates_read_timeout(35)
+        .post_init(_post_init)
+        .build()
+    )
+    app.add_error_handler(on_error)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("find", cmd_find))
