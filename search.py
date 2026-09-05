@@ -386,6 +386,56 @@ async def fetch_aviasales(client):
     return out
 
 
+# -------------------------------------------------------------- Dodo Brands
+
+# Карьерный сайт на Nuxt, но данные лежат в открытом JSON: вакансии
+# сгруппированы по направлениям, внутри каждого - список позиций.
+DODO_API = "https://career-api.dodoteam.ru/api/v1/vacancies"
+DODO_FORMATS = {"удал": "remote", "гибрид": "hybrid", "офис": "office"}
+
+
+async def fetch_dodo(client):
+    try:
+        resp = await client.get(DODO_API,
+                                headers={"User-Agent": UA, "Accept": "application/json"})
+        resp.raise_for_status()
+        groups = (resp.json() or {}).get("data") or []
+    except Exception as exc:
+        logger.warning("dodo: запрос не удался: %s %s", type(exc).__name__, exc)
+        return []
+
+    out = []
+    for group in groups:
+        for raw in group.get("items") or []:
+            vid = str(raw.get("id") or "")
+            title = (raw.get("position") or "").strip()
+            if not vid or not title:
+                continue
+            formats = []
+            for value in raw.get("work_format") or []:
+                low = (value or "").lower()
+                for key, code in DODO_FORMATS.items():
+                    if key in low:
+                        formats.append(code)
+            out.append({
+                "uid": "dodo:" + vid,
+                "source": "dodo",
+                "ext_id": vid,
+                "title": title,
+                "company": "Dodo Brands",
+                "area": (raw.get("vacancy_location") or "").strip()[:60],
+                "url": "https://dodoteam.ru/vacancy?vacancyId=" + vid,
+                # даты в их API нет - считаем вакансию свежей с момента находки
+                "published_at": _now_iso(),
+                "salary_from": None,
+                "salary_to": None,
+                "currency": "",
+                "work_format": ",".join(dict.fromkeys(formats)),
+                "experience": "",
+            })
+    return out
+
+
 # ------------------------------------------------------------- Хабр Карьера
 
 HABR_ID = re.compile(r'href="/vacancies/(\d+)"')
@@ -906,6 +956,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
             tasks += [fetch_hh_employer(client, eid, period=period)
                       for eid in HH_EMPLOYERS]
             tasks.append(fetch_aviasales(client))
+            tasks.append(fetch_dodo(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []

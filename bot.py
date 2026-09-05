@@ -68,7 +68,8 @@ SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
 SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch",
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
-                "companies": "Компании", "aviasales": "Aviasales"}
+                "companies": "Компании", "aviasales": "Aviasales",
+                "dodo": "Dodo Brands"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка по договорённости",
                "hybrid": "гибрид", "office": "офис"}
