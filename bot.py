@@ -69,7 +69,7 @@ SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "g
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
                 "companies": "Компании", "aviasales": "Aviasales",
-                "dodo": "Dodo Brands"}
+                "dodo": "Dodo Brands", "2gis": "2ГИС"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка по договорённости",
                "hybrid": "гибрид", "office": "офис"}
@@ -381,6 +381,51 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=MAIN_MENU)
 
 
+async def cmd_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/probe <адрес> — открыть сайт с сервера и рассказать, что там.
+
+    Нужно, когда карьерный сайт компании не открывается из России: сервер
+    в Европе его видит, а мы — нет. Команда только для админа: она ходит
+    по произвольному адресу, чужим такое давать нельзя.
+    """
+    if not ADMIN_ID or str(update.effective_user.id) != str(ADMIN_ID):
+        return
+    if not context.args:
+        await update.message.reply_text("Напиши так: /probe https://job.tochka.com/")
+        return
+
+    url = context.args[0]
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": search.UA})
+        text = resp.text
+    except Exception as exc:
+        await update.message.reply_text(
+            "Не открылось: " + type(exc).__name__ + " " + str(exc)[:200])
+        return
+
+    import re as _re
+    links = list(dict.fromkeys(_re.findall(
+        r'href="([^"]*(?:vacanc|ваканс|job|career)[^"]*)"', text)))[:8]
+    apis = list(dict.fromkeys(_re.findall(
+        r'https?://[\w.-]*api[\w.-]*/[\w/-]+', text)))[:5]
+    lines = [
+        "🔎 " + escape(str(resp.url))[:120],
+        "Код: " + str(resp.status_code) + " · размер: " + str(len(text)) + " байт",
+        "Слово «вакансия» в тексте: " + str(len(_re.findall(r"ваканс|vacanc", text, _re.I))),
+        "JS-оболочка: " + ("похоже на то" if ("__NUXT__" in text or "__NEXT_DATA__" in text
+                                              or len(text) < 4000) else "нет, HTML на месте"),
+    ]
+    if links:
+        lines.append("\nСсылки:\n" + escape("\n".join(links)))
+    if apis:
+        lines.append("\nAPI в коде страницы:\n" + escape("\n".join(apis)))
+    await update.message.reply_text("\n".join(lines)[:4000], parse_mode=ParseMode.HTML)
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = db.user_stats(update.effective_user.id)
     st = db.get_settings(update.effective_user.id)
@@ -681,6 +726,7 @@ def main():
     app.add_handler(CommandHandler("settings", cmd_settings))
     app.add_handler(CommandHandler("keywords", cmd_keywords))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("probe", cmd_probe))
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("reset", cmd_reset))

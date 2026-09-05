@@ -386,6 +386,55 @@ async def fetch_aviasales(client):
     return out
 
 
+# --------------------------------------------------------------------- 2ГИС
+
+# job.2gis.ru отдаёт список прямо в HTML, без отдельного API. Классы там
+# генерируются сборщиком (chipLabel-dBvEm5), поэтому цепляемся за устойчивое:
+# ссылку вида /vacancies/<направление>/<id>, заголовок с data-slot="heading"
+# и чипы с названием города или пометкой «Удалённо».
+GIS_URL = "https://job.2gis.ru/vacancies"
+GIS_ID = re.compile(r'href="(/vacancies/([a-z_]+)/(\d+))"')
+GIS_TITLE = re.compile(r'<h\d[^>]*data-slot="heading"[^>]*>(.*?)</h\d>', re.S)
+GIS_CHIP = re.compile(r'chipLabel-[^"]*">(.*?)</span>', re.S)
+
+
+async def fetch_2gis(client):
+    try:
+        resp = await client.get(GIS_URL, headers={"User-Agent": UA})
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("2gis: страница не открылась: %s %s", type(exc).__name__, exc)
+        return []
+
+    out = []
+    for chunk in resp.text.split('<a href="/vacancies/')[1:]:
+        m_id = GIS_ID.search('href="/vacancies/' + chunk[:200])
+        m_title = GIS_TITLE.search(chunk)
+        if not m_id or not m_title:
+            continue
+        chips = [_strip_tags(c) for c in GIS_CHIP.findall(chunk[:2000])]
+        remote = any("удал" in c.lower() for c in chips)
+        # последний чип - это город или «Удалённо», остальные про направление
+        city = "" if remote else (chips[-1] if chips else "")
+        out.append({
+            "uid": "2gis:" + m_id.group(3),
+            "source": "2gis",
+            "ext_id": m_id.group(3),
+            "title": _strip_tags(m_title.group(1)).replace(" ", " "),
+            "company": "2ГИС",
+            "area": city,
+            "url": "https://job.2gis.ru" + m_id.group(1),
+            # даты на сайте нет - считаем вакансию свежей с момента находки
+            "published_at": _now_iso(),
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "",
+            "work_format": "remote" if remote else "office",
+            "experience": "",
+        })
+    return out
+
+
 # -------------------------------------------------------------- Dodo Brands
 
 # Карьерный сайт на Nuxt, но данные лежат в открытом JSON: вакансии
@@ -989,6 +1038,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
                       for eid in HH_EMPLOYERS]
             tasks.append(fetch_aviasales(client))
             tasks.append(fetch_dodo(client))
+            tasks.append(fetch_2gis(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
