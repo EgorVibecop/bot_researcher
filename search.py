@@ -202,6 +202,95 @@ async def fetch_hh(client, query, area=113, period=7, pages=1, remote=False):
     return out
 
 
+# Компании, которые интересны отдельно: их вакансии часто не попадают в общую
+# выдачу (висят дольше окна поиска или названы по-своему). id работодателя на
+# hh — из адреса hh.ru/employer/<id>.
+HH_EMPLOYERS = {
+    588914: "Aviasales",
+    816144: "ВкусВилл",
+    10317521: "Додо Пицца",
+    1429999: "Циан",
+    3530: "СДЭК",
+    2324020: "Точка Банк",
+}
+
+# У работодателя может висеть тысяча вакансий (курьеры, продавцы), поэтому
+# спрашиваем сразу с исследовательским запросом по названию.
+EMPLOYER_QUERY = (
+    "исследователь OR исследователи OR исследованиям OR исследований OR "
+    "researcher OR research OR ресерчер OR ресёрч OR ресерч OR "
+    "UX OR CX OR custdev OR юзабилити OR социолог"
+)
+
+
+async def fetch_hh_employer(client, employer_id, period=30):
+    """Вакансии одной компании на hh — тем же разбором, что и обычный поиск."""
+    try:
+        resp = await _hh_get(
+            client, "https://hh.ru/search/vacancy",
+            {"text": EMPLOYER_QUERY, "employer_id": employer_id,
+             "search_field": "name", "order_by": "publication_time",
+             "search_period": period, "items_on_page": 50},
+            {"User-Agent": UA},
+        )
+        if resp is None:
+            return []
+        m = re.search(
+            r'<template[^>]*id="HH-Lux-InitialState"[^>]*>(.*?)</template>',
+            resp.text, re.S)
+        if not m:
+            logger.warning("hh: не нашёл состояние страницы для компании %s", employer_id)
+            return []
+        result = json.loads(html_mod.unescape(m.group(1)))["vacancySearchResult"]
+        return [_hh_item(i) for i in result.get("vacancies") or []]
+    except Exception as exc:
+        logger.warning("hh: компания %s не опросилась: %s %s",
+                       employer_id, type(exc).__name__, exc)
+        return []
+
+
+# --------------------------------------------------------------- Aviasales
+
+# Свой сайт вакансий: React-приложение, но данные лежат в открытом JSON.
+AVIASALES_API = "https://vacancies-app.aviasales.ru/api/vacancies"
+
+
+async def fetch_aviasales(client):
+    try:
+        resp = await client.get(AVIASALES_API,
+                                headers={"User-Agent": UA, "Accept": "application/json"})
+        resp.raise_for_status()
+        items = resp.json()
+    except Exception as exc:
+        logger.warning("aviasales: запрос не удался: %s %s", type(exc).__name__, exc)
+        return []
+
+    out = []
+    for raw in items if isinstance(items, list) else []:
+        vid = str(raw.get("id") or "")
+        title = (raw.get("position") or "").strip()
+        if not vid or not title:
+            continue
+        place = (raw.get("workPlace") or "").strip()
+        out.append({
+            "uid": "aviasales:" + vid,
+            "source": "aviasales",
+            "ext_id": vid,
+            "title": title,
+            "company": "Aviasales",
+            "area": place,
+            "url": "https://www.aviasales.ru/about/vacancies/" + vid,
+            # даты в их API нет - считаем вакансию свежей с момента находки
+            "published_at": _now_iso(),
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "",
+            "work_format": "remote" if "удал" in place.lower() else "",
+            "experience": "",
+        })
+    return out
+
+
 # ------------------------------------------------------------- Хабр Карьера
 
 HABR_ID = re.compile(r'href="/vacancies/(\d+)"')
@@ -718,6 +807,10 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
         if "linkedin" in sources:
             tasks += [fetch_linkedin(client, q, period_days=period)
                       for q in habr_queries]
+        if "companies" in sources:
+            tasks += [fetch_hh_employer(client, eid, period=period)
+                      for eid in HH_EMPLOYERS]
+            tasks.append(fetch_aviasales(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
