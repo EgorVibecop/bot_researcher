@@ -98,7 +98,8 @@ STOP_PATTERNS = _c([
     r"wildberries", r"\bwb\b", r"\bozon\b", r"маркетплейс", r"селлер",
     r"поиск\w*\s+и\s+запуск\w*\s+(нов\w+\s+)?товар", r"поиск\w*\s+товар",
     r"запуск\w*\s+товар", r"товарн\w+\s+аналитик",
-    # смежное IT и безопасность
+    # смежное IT и безопасность: «Golang developer/researcher» - не наш ресёрч
+    r"разработчик", r"\bdeveloper\b", r"programmer", r"\bengineer\b",
     r"тестировщик", r"\bqa\b", r"quality\s+assurance",
     r"пентест", r"информационн\w+\s+безопасност", r"кибербезопасн",
     r"\bбезопасност", r"security", r"\bасу\b", r"\bсоц[-\s]?инженер",
