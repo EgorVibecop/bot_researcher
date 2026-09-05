@@ -34,6 +34,11 @@ SETTINGS_DEFAULTS = {
     "include_no_salary": 1,
     "categories": DEFAULT_CATEGORIES,
     "sources": DEFAULT_SOURCES,
+    # Храним не список включённых источников, а список выключенных вручную.
+    # Иначе новый источник не доходит до тех, кто завёлся раньше: у них в
+    # строке остаётся старый список, и добавленный LinkedIn просто не
+    # опрашивается.
+    "sources_off": "",
     "mode": "instant",          # instant | digest
     "digest_hour": 10,
     "quiet_start": 23,
@@ -74,6 +79,7 @@ def init_db():
             include_no_salary INTEGER DEFAULT 1,
             categories TEXT,
             sources TEXT,
+            sources_off TEXT DEFAULT '',
             mode TEXT DEFAULT 'instant',
             digest_hour INTEGER DEFAULT 10,
             quiet_start INTEGER DEFAULT 23,
@@ -140,6 +146,7 @@ def _migrate(conn):
         "include_no_salary": "INTEGER DEFAULT 1",
         "categories": "TEXT",
         "sources": "TEXT",
+        "sources_off": "TEXT DEFAULT ''",
         "mode": "TEXT DEFAULT 'instant'",
         "digest_hour": "INTEGER DEFAULT 10",
         "quiet_start": "INTEGER DEFAULT 23",
@@ -189,6 +196,30 @@ def get_settings(user_id):
         if st.get(key) in (None, ""):
             st[key] = default
     return st
+
+
+def active_sources(st):
+    """Все источники, кроме выключенных вручную.
+
+    Считаем от текущего списка DEFAULT_SOURCES, поэтому добавленный источник
+    сразу работает у всех, а не только у тех, кто завёлся после него.
+    """
+    off = {s for s in (st.get("sources_off") or "").split(",") if s}
+    return [s for s in DEFAULT_SOURCES.split(",") if s not in off]
+
+
+def toggle_source(user_id, source):
+    """Включает или выключает один источник, возвращает новое состояние."""
+    st = get_settings(user_id)
+    off = [s for s in (st.get("sources_off") or "").split(",") if s]
+    if source in off:
+        off = [s for s in off if s != source]
+        enabled = True
+    else:
+        off.append(source)
+        enabled = False
+    set_setting(user_id, "sources_off", ",".join(off))
+    return enabled
 
 
 def set_setting(user_id, key, value):

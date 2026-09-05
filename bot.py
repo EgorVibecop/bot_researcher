@@ -254,7 +254,7 @@ async def poll_loop(app):
         try:
             sources = set()
             for user in db.active_users():
-                sources |= set((user.get("sources") or db.DEFAULT_SOURCES).split(","))
+                sources |= set(db.active_sources(user))
             if sources:
                 await collect(sources)
                 await deliver_all(app)
@@ -330,7 +330,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
                    update.effective_user.username or "")
     note = await update.message.reply_text("Проверяю источники…")
     st = db.get_settings(update.effective_user.id)
-    await collect(set((st.get("sources") or db.DEFAULT_SOURCES).split(",")))
+    await collect(set(db.active_sources(st)))
     picks = pick_for_user(st, limit=int(st.get("max_per_run", 8)))
     await note.delete()
     if not picks:
@@ -405,7 +405,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def settings_text(st):
     cats = [c for c in (st["categories"] or "").split(",") if c]
     cat_names = ", ".join(matching.category_label(c)[1] for c in cats) or "все"
-    srcs = [s for s in (st["sources"] or "").split(",") if s]
+    srcs = db.active_sources(st)
     return (
         "⚙️ <b>Настройки</b>\n\n"
         "Регион: <b>" + REGIONS.get(st["region"], "Вся Россия") + "</b>\n"
@@ -424,7 +424,7 @@ def settings_text(st):
 
 def settings_keyboard(st):
     cats = set(c for c in (st["categories"] or "").split(",") if c)
-    srcs = set(s for s in (st["sources"] or "").split(",") if s)
+    srcs = set(db.active_sources(st))
     mark = lambda on: "✅ " if on else "▫️ "
 
     rows = [[InlineKeyboardButton(
@@ -558,10 +558,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cats = [c for c in cats if c != cid] if cid in cats else cats + [cid]
         db.set_setting(user_id, "categories", ",".join(cats))
     elif data.startswith("src:"):
-        sid = data.split(":", 1)[1]
-        srcs = [s for s in (st["sources"] or "").split(",") if s]
-        srcs = [s for s in srcs if s != sid] if sid in srcs else srcs + [sid]
-        db.set_setting(user_id, "sources", ",".join(srcs))
+        db.toggle_source(user_id, data.split(":", 1)[1])
 
     st = db.get_settings(user_id)
     await query.answer("Сохранил")
