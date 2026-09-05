@@ -530,11 +530,30 @@ LI_PLACE = re.compile(r'job-search-card__location"[^>]*>(.*?)</span>', re.S)
 LI_DATE = re.compile(r'<time[^>]*datetime="([^"]+)"')
 
 
+# Где ищем: Россия и весь мир. Список можно переопределить переменной
+# LINKEDIN_LOCATIONS через запятую.
+LINKEDIN_LOCATIONS = [loc.strip() for loc in os.getenv(
+    "LINKEDIN_LOCATIONS", "Russian Federation,Worldwide").split(",") if loc.strip()]
+LI_PAGES = 3            # выдача отдаёт по 10 вакансий на страницу
+
+
 async def fetch_linkedin(client, query, location="Russian Federation",
-                         period_days=30):
-    # фильтр f_WT=2 («Remote») в гостевой выдаче не работает - она отдаёт то же
-    # самое, поэтому удалёнку определяем по тексту названия и локации
-    params = {"keywords": query, "location": location, "start": 0,
+                         period_days=30, pages=LI_PAGES):
+    """Гостевая выдача LinkedIn. Формат работы там не публикуется, а фильтр
+    f_WT=2 («Remote») выдачу не меняет - проверено. Поэтому удалёнку
+    определяем по тексту названия и локации («… (Remote)»)."""
+    out = []
+    for page in range(pages):
+        chunk_out = await _fetch_linkedin_page(client, query, location,
+                                               period_days, page * 10)
+        out.extend(chunk_out)
+        if len(chunk_out) < 10:
+            break
+    return out
+
+
+async def _fetch_linkedin_page(client, query, location, period_days, start):
+    params = {"keywords": query, "location": location, "start": start,
               "f_TPR": "r" + str(period_days * 86400)}
     try:
         async with LI_LIMIT:
@@ -545,8 +564,8 @@ async def fetch_linkedin(client, query, location="Russian Federation",
             return []
         resp.raise_for_status()
     except Exception as exc:
-        logger.warning("linkedin: запрос не удался (%s): %s %s",
-                       query, type(exc).__name__, exc)
+        logger.warning("linkedin: запрос не удался (%s / %s): %s %s",
+                       query, location, type(exc).__name__, exc)
         return []
 
     out = []
@@ -963,8 +982,8 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
         if "tg" in sources and tg_source.configured():
             tasks.append(tg_source.fetch_telegram(client, habr_queries))
         if "linkedin" in sources:
-            tasks += [fetch_linkedin(client, q, period_days=period)
-                      for q in habr_queries]
+            tasks += [fetch_linkedin(client, q, location=loc, period_days=period)
+                      for q in habr_queries for loc in LINKEDIN_LOCATIONS]
         if "companies" in sources:
             tasks += [fetch_hh_employer(client, eid, period=period)
                       for eid in HH_EMPLOYERS]
