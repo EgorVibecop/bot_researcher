@@ -102,7 +102,7 @@ STOP_PATTERNS = _c([
     r"разработчик", r"\bdeveloper\b", r"programmer", r"\bengineer\b",
     r"тестировщик", r"\bqa\b", r"quality\s+assurance",
     r"пентест", r"информационн\w+\s+безопасност", r"кибербезопасн",
-    r"threat", r"malware", r"vulnerabilit", r"уязвимост",
+    r"\bthreat\b", r"malware", r"vulnerabilit", r"уязвимост",
     r"\bбезопасност", r"security", r"\bасу\b", r"\bсоц[-\s]?инженер",
     # HR-ресерч и админ-роли, которые тоже зовут себя исследователями
     r"\bhr\b", r"эйчар", r"аккаунт[-\s]?менеджер",
