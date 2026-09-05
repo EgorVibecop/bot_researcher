@@ -70,8 +70,12 @@ SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "g
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
                 "companies": "Компании", "aviasales": "Aviasales"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
-WORK_FORMAT = {"remote": "удалённо", "hybrid": "гибрид", "office": "офис"}
-WORK_FORMAT_ORDER = ["remote", "hybrid", "office"]
+WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка по договорённости",
+               "hybrid": "гибрид", "office": "офис"}
+WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office"]
+# в настройках выбираются только эти три: remote_maybe навешивает сам бот,
+# когда находит обещание удалёнки в тексте вакансии
+SETTING_FORMATS = ["remote", "hybrid", "office"]
 
 
 def format_names(value):
@@ -163,6 +167,14 @@ async def collect(sources=None):
         cats = matching.classify(vac["title"])
         vac["relevant"] = cats is not None
         vac["categories"] = cats or []
+
+    # У подходящих вакансий без удалёнки в шапке заглядываем в описание:
+    # там часто «возможна удалёнка» или «формат обсуждается». Читаем только
+    # те, которых ещё нет в базе, — старые уже проверены.
+    known = db.known_uids([v["uid"] for v in items])
+    await search.enrich_remote(
+        [v for v in items if v.get("relevant") and v["uid"] not in known])
+
     fresh = db.upsert_vacancies(items)
     logger.info("собрано %s вакансий, новых %s", len(items), len(fresh))
     return items, fresh
@@ -420,7 +432,7 @@ def settings_keyboard(st):
     formats = set(f for f in (st["work_formats"] or "").split(",") if f)
     rows.append([InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
                                       callback_data="wf:" + f)
-                 for f in WORK_FORMAT_ORDER])
+                 for f in SETTING_FORMATS])
     rows.append([
         InlineKeyboardButton(mark(st["include_no_salary"]) + "вакансии без ЗП",
                              callback_data="s:include_no_salary:" +

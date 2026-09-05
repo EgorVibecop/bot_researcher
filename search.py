@@ -212,6 +212,14 @@ HH_EMPLOYERS = {
     1429999: "Циан",
     3530: "СДЭК",
     2324020: "Точка Банк",
+    64174: "2ГИС",
+    5063336: "Flowwow (Флаувау)",
+    1316038: "Достависта",
+    5775055: "Twinby",
+    10745593: "GGSel",
+    3536822: "Whoosh",
+    678191: "Юрент",
+    5987910: "Urent (Кикшеринг)",
 }
 
 # У работодателя может висеть тысяча вакансий (курьеры, продавцы), поэтому
@@ -247,6 +255,93 @@ async def fetch_hh_employer(client, employer_id, period=30):
         logger.warning("hh: компания %s не опросилась: %s %s",
                        employer_id, type(exc).__name__, exc)
         return []
+
+
+# ------------------------------------------- скрытая удалёнка в описании
+
+# В шапке вакансии стоит «гибрид» или «офис», а в тексте — «возможна
+# удалёнка», «формат обсуждается», «офис по желанию». Такие вакансии
+# помечаем форматом remote_maybe: «удалёнка по договорённости».
+REMOTE_IN_TEXT = re.compile(
+    r"возможн\w*\s+(?:\w+\s+){0,2}удал[ёе]нн"
+    r"|удал[ёе]нк\w*\s+возможн"
+    r"|можно\s+(?:работать\s+)?удал[ёе]нно"
+    r"|удал[ёе]нн\w+\s+(?:работа|формат|график|режим|сотрудничеств|занятост)"
+    r"|готовы\s+(?:обсуд|рассмотр)\w*\s+(?:\w+\s+){0,3}удал[ёе]нк"
+    r"|формат\w*\s+(?:работы\s+)?(?:обсужда|гибк|на\s+выбор|по\s+договор|любой)"
+    r"|(?:в\s+)?офисе?\s+или\s+удал[ёе]нно"
+    r"|офис\s+по\s+желанию"
+    r"|можно\s+из\s+дома"
+    r"|из\s+люб(?:ой\s+точки|ого\s+города)"
+    r"|work\s+from\s+anywhere"
+    r"|remote\s+(?:is\s+)?possible"
+    r"|(?:full[\s-]?)?remote\s+option",
+    re.IGNORECASE)
+
+# Рядом с теми же словами часто стоит отказ — «удалённая работа не
+# предполагается». Такие совпадения не считаем.
+REMOTE_DENIAL = re.compile(
+    r"не\s+предполага|не\s+рассматрива|не\s+предусмотрен|без\s+удал[ёе]нк"
+    r"|только\s+офис|исключительно\s+в\s+офисе|нет\s+удал[ёе]нк"
+    r"|удал[ёе]нн\w+\s+работа\s+невозможна|не\s+удал[ёе]нн",
+    re.IGNORECASE)
+
+REMOTE_WINDOW = 90      # столько символов вокруг совпадения смотрим на отказ
+ENRICH_LIMIT = 25       # сколько вакансий за цикл догружаем ради описания
+
+
+def remote_mentioned(text):
+    """Есть ли в описании обещание удалёнки, не перечёркнутое отказом."""
+    plain = _strip_tags(text)
+    for m in REMOTE_IN_TEXT.finditer(plain):
+        around = plain[max(0, m.start() - REMOTE_WINDOW):m.end() + REMOTE_WINDOW]
+        if not REMOTE_DENIAL.search(around):
+            return True
+    return False
+
+
+async def fetch_hh_description(client, vacancy_id):
+    resp = await _hh_get(client, "https://hh.ru/vacancy/" + str(vacancy_id),
+                         {}, {"User-Agent": UA})
+    if resp is None:
+        return ""
+    m = re.search(r'<template[^>]*id="HH-Lux-InitialState"[^>]*>(.*?)</template>',
+                  resp.text, re.S)
+    if not m:
+        return ""
+    view = json.loads(html_mod.unescape(m.group(1))).get("vacancyView") or {}
+    return view.get("description") or ""
+
+
+async def enrich_remote(items, limit=ENRICH_LIMIT):
+    """Дочитывает описания вакансий, у которых в шапке удалёнки нет.
+
+    Дорого (по запросу на вакансию), поэтому вызывается только для новых
+    подходящих вакансий и не больше limit штук за цикл.
+    """
+    targets = [v for v in items
+               if v.get("source") == "hh"
+               and "remote" not in (v.get("work_format") or "")][:limit]
+    if not targets:
+        return 0
+
+    found = 0
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        for vac in targets:
+            try:
+                description = await fetch_hh_description(client, vac["ext_id"])
+            except Exception as exc:
+                logger.info("не смог прочитать описание %s: %s %s",
+                            vac["uid"], type(exc).__name__, exc)
+                continue
+            if description and remote_mentioned(description):
+                formats = [f for f in (vac.get("work_format") or "").split(",") if f]
+                formats.append("remote_maybe")
+                vac["work_format"] = ",".join(dict.fromkeys(formats))
+                found += 1
+    logger.info("описаний прочитано %s, скрытой удалёнки найдено %s",
+                len(targets), found)
+    return found
 
 
 # --------------------------------------------------------------- Aviasales

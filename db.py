@@ -257,6 +257,23 @@ def upsert_vacancies(items):
     return fresh
 
 
+def known_uids(uids):
+    """Какие из этих вакансий уже лежат в базе — чтобы не перечитывать их."""
+    if not uids:
+        return set()
+    conn = get_conn()
+    found = set()
+    uids = list(uids)
+    for start in range(0, len(uids), 400):
+        chunk = uids[start:start + 400]
+        marks = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            "SELECT uid FROM vacancies WHERE uid IN (" + marks + ")", chunk).fetchall()
+        found |= {r["uid"] for r in rows}
+    conn.close()
+    return found
+
+
 def unsent_for_user(user_id, days=30, limit=500):
     """Вакансии, которые этому человеку ещё не отправляли (свежие сверху)."""
     since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
@@ -440,11 +457,15 @@ def matches_user(vac, st, includes, excludes, muted):
 
     wanted_formats = set(
         f for f in (st.get("work_formats") or DEFAULT_WORK_FORMATS).split(",") if f)
+    # «удалёнка по договорённости» (в шапке гибрид, в описании обещают
+    # удалёнку) засчитывается тому, кто просил удалёнку
+    if "remote" in wanted_formats:
+        wanted_formats.add("remote_maybe")
     if wanted_formats and not formats & wanted_formats:
         return False
 
     region = st.get("region") or "any"
-    if region in MSK_CITY and "remote" not in formats:
+    if region in MSK_CITY and not formats & {"remote", "remote_maybe"}:
         if not any(city in area for city in MSK_CITY[region]):
             return False
 
