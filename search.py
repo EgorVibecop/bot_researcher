@@ -775,11 +775,23 @@ async def fetch_superjob(client, query, period_days=30, count=100):
     """
     if not SUPERJOB_KEY:
         return []
+    # keyword ищет по всему тексту вакансии - нам нужен только заголовок,
+    # поэтому берём расширенный поиск: srws=1 это «должность», skwc=or
+    # «хотя бы одно слово». Период задаём датой: параметр period понимает
+    # только 1, 3, 7 и 0, а нам нужно окно в 30 дней.
+    since = int(datetime.now(MSK).timestamp()) - period_days * 86400
+    params = [
+        ("keywords[0][srws]", 1),
+        ("keywords[0][skwc]", "or"),
+        ("keywords[0][keys]", query),
+        ("date_published_from", since),
+        ("order_field", "date"),
+        ("count", count),
+    ]
     try:
         resp = await client.get(
             "https://api.superjob.ru/2.0/vacancies/",
-            params={"keyword": query, "count": count, "order_field": "date",
-                    "period": period_days},
+            params=params,
             headers={"X-Api-App-Id": SUPERJOB_KEY, "User-Agent": UA},
         )
         resp.raise_for_status()
@@ -806,8 +818,9 @@ async def fetch_superjob(client, query, period_days=30, count=100):
             "salary_from": raw.get("payment_from") or None,
             "salary_to": raw.get("payment_to") or None,
             "currency": (raw.get("currency") or "rub").upper().replace("RUB", "RUR"),
-            "work_format": "remote" if raw.get("place_of_work", {}).get("id") == 2 else "",
-            "experience": "",
+            # place_of_work: 2 - «на дому», то есть удалёнка
+            "work_format": "remote" if (raw.get("place_of_work") or {}).get("id") == 2 else "",
+            "experience": (raw.get("experience") or {}).get("title") or "",
         })
     return out
 

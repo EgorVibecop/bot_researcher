@@ -175,10 +175,27 @@ def main_part(title):
     return _QUALIFIER.sub(" ", title or "").strip()
 
 
+# Второй путь в ленту: роли вокруг клиентского и пользовательского опыта.
+# «CX-менеджер», «руководитель направления клиентского опыта» - формально не
+# исследователи, но работа та же. Нужны оба совпадения: тема и роль, иначе
+# сюда попадёт «UX/UI дизайнер».
+DOMAIN_MARKERS = _c([
+    r"\bux\b", r"\bcx\b", r"\buxr\b", r"\bcxr\b",
+    r"customer\s+experience", r"user\s+experience",
+    r"клиентск\w+\s+опыт", r"пользовательск\w+\s+опыт",
+    r"\bcjm\b", r"\bnps\b", r"путь\s+клиента", r"клиентск\w+\s+пут",
+])
+ROLE_MARKERS = _c([
+    r"менеджер", r"manager", r"специалист", r"руководител", r"директор",
+    r"эксперт", r"аналитик", r"head\s+of", r"\blead\b", r"\bлид\b", r"owner",
+])
+
+
 def classify(title):
     """Возвращает список категорий или None, если вакансия не подходит."""
     texts = variants(title)
-    if not _hits(RESEARCH_CORE, texts):
+    domain_role = _hits(DOMAIN_MARKERS, texts) and _hits(ROLE_MARKERS, texts)
+    if not _hits(RESEARCH_CORE, texts) and not domain_role:
         return None
     if _hits(STOP_PATTERNS, texts):
         return None
