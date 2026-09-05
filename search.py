@@ -283,6 +283,67 @@ async def fetch_habr(client, query, remote=False):
     return out
 
 
+# ----------------------------------------------------------------- LinkedIn
+
+# Гостевая выдача LinkedIn: та же, что видна без входа в аккаунт.
+LI_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+LI_LIMIT = asyncio.Semaphore(2)
+LI_ID = re.compile(r'data-entity-urn="urn:li:jobPosting:(\d+)"')
+LI_LINK = re.compile(r'base-card__full-link"[^>]*href="([^"?]+)')
+LI_TITLE = re.compile(r'base-search-card__title"[^>]*>(.*?)</h3>', re.S)
+LI_COMPANY = re.compile(r'base-search-card__subtitle"[^>]*>.*?<a[^>]*>(.*?)</a>', re.S)
+LI_PLACE = re.compile(r'job-search-card__location"[^>]*>(.*?)</span>', re.S)
+LI_DATE = re.compile(r'<time[^>]*datetime="([^"]+)"')
+
+
+async def fetch_linkedin(client, query, location="Russian Federation",
+                         period_days=30):
+    # фильтр f_WT=2 («Remote») в гостевой выдаче не работает - она отдаёт то же
+    # самое, поэтому удалёнку определяем по тексту названия и локации
+    params = {"keywords": query, "location": location, "start": 0,
+              "f_TPR": "r" + str(period_days * 86400)}
+    try:
+        async with LI_LIMIT:
+            resp = await client.get(LI_URL, params=params, headers={"User-Agent": UA})
+            await asyncio.sleep(1.0)
+        if resp.status_code == 429:
+            logger.info("linkedin: слишком часто, пропускаю запрос «%s»", query)
+            return []
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("linkedin: запрос не удался (%s): %s %s",
+                       query, type(exc).__name__, exc)
+        return []
+
+    out = []
+    for chunk in resp.text.split("<li>")[1:]:
+        m_id = LI_ID.search(chunk)
+        m_title = LI_TITLE.search(chunk)
+        if not m_id or not m_title:
+            continue
+        m_link = LI_LINK.search(chunk)
+        m_company = LI_COMPANY.search(chunk)
+        m_place = LI_PLACE.search(chunk)
+        m_date = LI_DATE.search(chunk)
+        out.append({
+            "uid": "linkedin:" + m_id.group(1),
+            "source": "linkedin",
+            "ext_id": m_id.group(1),
+            "title": _strip_tags(m_title.group(1)),
+            "company": _strip_tags(m_company.group(1)) if m_company else "",
+            "area": _strip_tags(m_place.group(1))[:60] if m_place else "",
+            "url": m_link.group(1) if m_link
+                   else "https://www.linkedin.com/jobs/view/" + m_id.group(1),
+            "published_at": _to_iso(m_date.group(1) if m_date else None),
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "",
+            "work_format": "",
+            "experience": "",
+        })
+    return out
+
+
 # ----------------------------------------------------------------- getmatch
 
 async def fetch_getmatch(client, limit=100, pages=2):
@@ -615,9 +676,14 @@ def merge_duplicates(items):
 
 
 def _augment_formats(item):
-    """Если в названии написано «удалённо», а источник формат не отдал."""
+    """Если «удалённо» написано в названии или в локации, а формата нет.
+
+    Локация нужна для LinkedIn: там формат работы отдельным полем не приходит,
+    зато в месте работы пишут «Moscow, Russia (Remote)».
+    """
     formats = [f for f in (item.get("work_format") or "").split(",") if f]
-    if REMOTE_IN_TITLE.search(item.get("title") or "") and "remote" not in formats:
+    where = (item.get("title") or "") + " " + (item.get("area") or "")
+    if REMOTE_IN_TITLE.search(where) and "remote" not in formats:
         formats.append("remote")
     item["work_format"] = ",".join(formats)
     return item
@@ -649,6 +715,9 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
             tasks += [fetch_superjob(client, q) for q in habr_queries]
         if "tg" in sources and tg_source.configured():
             tasks.append(tg_source.fetch_telegram(client, habr_queries))
+        if "linkedin" in sources:
+            tasks += [fetch_linkedin(client, q, period_days=period)
+                      for q in habr_queries]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []

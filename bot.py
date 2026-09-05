@@ -46,7 +46,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "30"))
-SEARCH_PERIOD_DAYS = int(os.getenv("SEARCH_PERIOD_DAYS", "7"))
+SEARCH_PERIOD_DAYS = int(os.getenv("SEARCH_PERIOD_DAYS", "30"))
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -67,7 +67,7 @@ REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санк
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
 SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch",
                 "tg": "Telegram", "geekjob": "Geekjob",
-                "itone": "IT_One", "superjob": "SuperJob"}
+                "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "hybrid": "гибрид", "office": "офис"}
 WORK_FORMAT_ORDER = ["remote", "hybrid", "office"]
@@ -177,7 +177,9 @@ def user_filters(user_id):
 
 def pick_for_user(st, limit=None):
     includes, excludes, muted = user_filters(st["user_id"])
-    pending = db.unsent_for_user(st["user_id"])
+    # окно ленты совпадает с окном сбора, иначе часть собранного
+    # никогда не доедет до человека
+    pending = db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS)
     picked = [v for v in pending if db.matches_user(v, st, includes, excludes, muted)]
     picked.reverse()  # сначала то, что постарше - лента читается сверху вниз
     if limit:

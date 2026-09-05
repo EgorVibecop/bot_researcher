@@ -17,6 +17,29 @@ def _c(patterns):
     return [re.compile(p, re.IGNORECASE) for p in patterns]
 
 
+# Работодатели регулярно пишут «UХ-исследователь» кириллической Х. Такое
+# название не находится обычным поиском и не ловится паттернами, поэтому
+# каждое название дополнительно проверяем в варианте, где кириллические
+# двойники латинских букв заменены на латиницу.
+HOMOGLYPHS = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O",
+    "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X", "І": "I", "Ѕ": "S",
+    "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o",
+    "р": "p", "с": "c", "т": "t", "у": "y", "х": "x", "і": "i", "ѕ": "s",
+})
+
+
+def variants(text):
+    """Название как есть плюс вариант с латинизированными двойниками."""
+    text = text or ""
+    latin = text.translate(HOMOGLYPHS)
+    return (text,) if latin == text else (text, latin)
+
+
+def _hits(patterns, texts):
+    return any(p.search(t) for p in patterns for t in texts)
+
+
 # --- 1. Исследовательское ядро -------------------------------------------
 # Хотя бы одно совпадение обязательно, иначе вакансия не наша.
 RESEARCH_CORE = _c([
@@ -43,7 +66,9 @@ STOP_PATTERNS = _c([
     r"химик", r"хими\w*[-\s]?(технолог|аналитик)", r"биолог", r"микробиолог",
     r"геолог", r"геофизи", r"геодез", r"нефт", r"буров", r"скважин",
     r"агроном", r"селекц", r"зоотехн", r"ветеринар",
-    r"клиническ", r"доклиническ", r"фармац", r"провизор", r"медицинск",
+    r"клиническ", r"доклиническ", r"clinical", r"фармац", r"провизор", r"медицинск",
+    r"долголети", r"исследован\w*\s+стабильност", r"биоэконом",
+    r"reverse\s*engineer", r"research\s+engineer", r"computer\s+vision",
     r"радиолог", r"рентген", r"\bврач\b", r"фельдшер",
     r"криминалист", r"судебн\w*\s+эксперт", r"полиграфолог",
     r"испытател", r"инженер[-\s]?исследовател", r"конструктор",
@@ -51,6 +76,7 @@ STOP_PATTERNS = _c([
     # рекрутмент (ресечер = сорсер), продажи, поле
     r"ресечер\w*\s*\(?\s*(специалист\s+по\s+)?подбор",
     r"подбор\w*\s+персонал", r"рекрут", r"сорсер", r"\bhr[-\s]?ресерч",
+    r"sourcer", r"sourcing", r"recruit", r"talent\s+acquisition", r"\bкибер",
     r"тайн\w+\s+покупател", r"интервьюер", r"анкетер", r"мерчандайзер",
     r"пеш\w+\s+исследовател", r"курьер", r"промоутер",
     r"личн\w+\s+ассистент", r"бизнес[-\s]?ассистент",
@@ -150,15 +176,15 @@ def main_part(title):
 
 def classify(title):
     """Возвращает список категорий или None, если вакансия не подходит."""
-    t = title or ""
-    if not any(p.search(t) for p in RESEARCH_CORE):
+    texts = variants(title)
+    if not _hits(RESEARCH_CORE, texts):
         return None
-    if any(p.search(t) for p in STOP_PATTERNS):
+    if _hits(STOP_PATTERNS, texts):
         return None
-    if any(p.search(main_part(t)) for p in SOFT_STOP_PATTERNS):
+    if _hits(SOFT_STOP_PATTERNS, [main_part(t) for t in texts]):
         return None
     cats = [cid for cid, (_e, _l, pats) in CATEGORIES.items()
-            if any(p.search(t) for p in pats)]
+            if _hits(pats, texts)]
     return cats or ["research"]
 
 
@@ -182,12 +208,13 @@ def match(title, extra_include=(), extra_exclude=()):
     if cats is not None:
         return True, cats
 
+    texts = variants(title)
     for word in extra_include:
         if word and word.lower() in t:
-            if any(p.search(title or "") for p in STOP_PATTERNS):
+            if _hits(STOP_PATTERNS, texts):
                 return False, []
             own = [cid for cid, (_e, _l, pats) in CATEGORIES.items()
-                   if any(p.search(title or "") for p in pats)]
+                   if _hits(pats, texts)]
             return True, own or ["research"]
 
     return False, []
@@ -218,6 +245,12 @@ HH_QUERIES = [
 
     'custdev OR кастдев OR "глубинные интервью" OR "качественные исследования" OR '
     '"количественные исследования" OR "user research" OR "customer research"',
+
+    # Совсем широкий: одно слово, без второго условия. Ловит то, что мимо
+    # остальных запросов: «UХ-исследователь» с кириллической Х, «Ресерчер»,
+    # просто «Исследователь». Мусора много, его срезают ядро и стоп-слова.
+    'исследователь OR исследователи OR исследованиям OR исследований OR '
+    'researcher OR research OR ресерчер OR ресёрчер OR ресерч',
 ]
 
 # Хабр Карьера ищет свободным текстом и очень широко — фильтруем уже у себя.

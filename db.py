@@ -23,7 +23,7 @@ DB_PATH = Path(os.getenv("DB_PATH") or (Path(__file__).parent / "jobs.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CATEGORIES = "ux,cx,product,marketing,socio,research"
-DEFAULT_SOURCES = "hh,habr,getmatch,geekjob,itone,superjob,tg"
+DEFAULT_SOURCES = "hh,habr,getmatch,geekjob,itone,superjob,tg,linkedin"
 
 DEFAULT_WORK_FORMATS = "remote"     # remote | hybrid | office, через запятую
 
@@ -257,7 +257,7 @@ def upsert_vacancies(items):
     return fresh
 
 
-def unsent_for_user(user_id, days=14, limit=300):
+def unsent_for_user(user_id, days=30, limit=500):
     """Вакансии, которые этому человеку ещё не отправляли (свежие сверху)."""
     since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
     conn = get_conn()
