@@ -46,7 +46,15 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "30"))
-SEARCH_PERIOD_DAYS = int(os.getenv("SEARCH_PERIOD_DAYS", "30"))
+# Окно поиска специально задано в коде, а не переменной окружения: в панели
+# хостинга когда-то осталось значение 7, оно перебивало код, и всё, что висит
+# дольше недели, для бота не существовало - так терялись живые вакансии,
+# опубликованные две-три недели назад. Значение меньше 30 бессмысленно:
+# исследовательские вакансии висят месяцами.
+SEARCH_PERIOD_DAYS = 30
+_env_period = os.getenv("SEARCH_PERIOD_DAYS")
+if _env_period and _env_period.isdigit() and int(_env_period) > SEARCH_PERIOD_DAYS:
+    SEARCH_PERIOD_DAYS = int(_env_period)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
