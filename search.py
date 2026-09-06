@@ -570,7 +570,13 @@ async def fetch_habr(client, query, remote=False):
 
 # Гостевая выдача LinkedIn: та же, что видна без входа в аккаунт.
 LI_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-LI_LIMIT = asyncio.Semaphore(2)
+# LinkedIn жёстко режет запросы с серверных адресов: на хостинге почти каждый
+# запрос отвечал 429. Поэтому ходим по одному, с паузой, а поймав отказ -
+# отступаем на пару часов вместо того, чтобы долбить его каждые полчаса.
+LI_LIMIT = asyncio.Semaphore(1)
+LI_PAUSE = 3.0
+LI_COOLDOWN_HOURS = 2
+_li_blocked_until = None
 LI_ID = re.compile(r'data-entity-urn="urn:li:jobPosting:(\d+)"')
 LI_LINK = re.compile(r'base-card__full-link"[^>]*href="([^"?]+)')
 LI_TITLE = re.compile(r'base-search-card__title"[^>]*>(.*?)</h3>', re.S)
@@ -602,14 +608,20 @@ async def fetch_linkedin(client, query, location="Russian Federation",
 
 
 async def _fetch_linkedin_page(client, query, location, period_days, start):
+    global _li_blocked_until
+    if _li_blocked_until and datetime.now(MSK) < _li_blocked_until:
+        return []
+
     params = {"keywords": query, "location": location, "start": start,
               "f_TPR": "r" + str(period_days * 86400)}
     try:
         async with LI_LIMIT:
             resp = await client.get(LI_URL, params=params, headers={"User-Agent": UA})
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(LI_PAUSE)
         if resp.status_code == 429:
-            logger.info("linkedin: слишком часто, пропускаю запрос «%s»", query)
+            _li_blocked_until = datetime.now(MSK) + timedelta(hours=LI_COOLDOWN_HOURS)
+            logger.info("linkedin: отказ по частоте, отступаю до %s",
+                        _li_blocked_until.strftime("%H:%M"))
             return []
         resp.raise_for_status()
     except Exception as exc:
