@@ -296,22 +296,30 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML, reply_markup=MAIN_MENU,
     )
     if is_new:
-        db.mark_all_sent(user.id)  # чтобы не завалить историей
         await update.message.reply_text("Собираю первую подборку, это займёт полминуты…")
         await collect()
-        db.forget_sent(user.id)
         st = db.get_settings(user.id)
         picks = pick_for_user(st, limit=5)
-        db.mark_all_sent(user.id)
-        if picks:
-            await send_vacancies(context.bot, update.effective_chat.id, picks)
+        if not picks:
             await update.message.reply_text(
-                "Это самое свежее. Дальше буду присылать только новое."
-            )
+                "Сейчас свежих подходящих вакансий нет — пришлю, как появятся.")
+            return
+
+        sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
+        db.mark_sent(user.id, sent)
+        # Остальное НЕ помечаем отправленным: раньше бот на этом месте
+        # записывал весь месячный улов в «уже показано», и живые вакансии
+        # двух-трёхнедельной давности человек не видел никогда. Теперь они
+        # доедут обычным порядком - по max_per_run штук за проверку.
+        left = len(pick_for_user(st))
+        if left:
+            await update.message.reply_text(
+                "Это самое свежее. В запасе ещё " + str(left) + " подходящих — "
+                "буду присылать их порциями по " + str(int(st.get("max_per_run", 8))) +
+                " штук каждые " + str(CHECK_INTERVAL_MINUTES) + " мин, "
+                "потом только новое.")
         else:
-            await update.message.reply_text(
-                "Сейчас свежих подходящих вакансий нет — пришлю, как появятся."
-            )
+            await update.message.reply_text("Дальше буду присылать только новое.")
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
