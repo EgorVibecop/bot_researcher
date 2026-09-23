@@ -386,6 +386,73 @@ async def fetch_aviasales(client):
     return out
 
 
+# -------------------------------------------------------------------- Авито
+
+# career.avito.com рисует карточки скриптом, но данные уже лежат в HTML
+# атрибутами data-vacancy-*: id, раздел, города и готовая пометка удалёнки.
+# На главной по четыре вакансии из раздела, весь список - на страницах
+# разделов, поэтому обходим ещё и профильные для нас.
+AVITO_HOST = "https://career.avito.com"
+AVITO_PAGES = [
+    "/vacancies/",
+    "/vacancies/analitika-dannykh",
+    "/vacancies/upravlenie-produktom",
+    "/vacancies/dizayn",
+    "/vacancies/marketing",
+    "/vacancies/klientskiy-servis",
+    "/vacancies/ux-redaktsiya",
+    "/vacancies/data-science",
+]
+AVITO_HREF = re.compile(r'href="(/vacancies/[\w-]+/(\d+)/?)"')
+AVITO_NAME = re.compile(r'item-name"[^>]*>(.*?)</a>', re.S)
+AVITO_ATTR = re.compile(r'data-vacancy-(\w+)="([^"]*)"')
+
+
+def _avito_cards(text):
+    for chunk in text.split("data-vacancy-id=")[1:]:
+        head = chunk[:1500]
+        m_href = AVITO_HREF.search(head)
+        m_name = AVITO_NAME.search(head)
+        if not m_href or not m_name:
+            continue
+        attrs = dict(AVITO_ATTR.findall(head))
+        remote = (attrs.get("remote") or "").strip().lower().startswith("да")
+        yield {
+            "uid": "avito:" + m_href.group(2),
+            "source": "avito",
+            "ext_id": m_href.group(2),
+            "title": _strip_tags(m_name.group(1)),
+            "company": "Авито",
+            "area": (attrs.get("geo") or "").strip()[:60],
+            "url": AVITO_HOST + m_href.group(1),
+            # даты на сайте нет - считаем вакансию свежей с момента находки
+            "published_at": _now_iso(),
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "",
+            "work_format": "remote" if remote else "office",
+            "experience": "",
+        }
+
+
+async def fetch_avito(client):
+    out, seen = [], set()
+    for path in AVITO_PAGES:
+        try:
+            resp = await client.get(AVITO_HOST + path, headers={"User-Agent": UA})
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("avito: %s не открылась: %s %s", path, type(exc).__name__, exc)
+            continue
+        for item in _avito_cards(resp.text):
+            if item["uid"] in seen:
+                continue
+            seen.add(item["uid"])
+            out.append(item)
+        await asyncio.sleep(0.5)
+    return out
+
+
 # --------------------------------------------------------------------- 2ГИС
 
 # job.2gis.ru отдаёт список прямо в HTML, без отдельного API. Классы там
@@ -1051,6 +1118,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
             tasks.append(fetch_aviasales(client))
             tasks.append(fetch_dodo(client))
             tasks.append(fetch_2gis(client))
+            tasks.append(fetch_avito(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []

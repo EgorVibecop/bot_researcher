@@ -77,7 +77,7 @@ STOP_PATTERNS = _c([
     r"ресечер\w*\s*\(?\s*(специалист\s+по\s+)?подбор",
     r"подбор\w*\s+персонал", r"рекрут", r"сорсер", r"\bhr[-\s]?ресерч",
     r"sourcer", r"sourcing", r"recruit", r"talent\s+acquisition", r"\bкибер",
-    r"тайн\w+\s+покупател", r"интервьюер", r"анкетер", r"мерчандайзер",
+    r"тайн\w+\s+покупател", r"мерчандайзер",
     r"пеш\w+\s+исследовател", r"курьер", r"промоутер",
     r"личн\w+\s+ассистент", r"бизнес[-\s]?ассистент",
     # обзвон и полевые опросы по телефону
@@ -167,6 +167,21 @@ SOFT_STOP_PATTERNS = _c([
     r"продаж", r"\bsales\b", r"account\s+manager",
 ])
 
+# Полевые роли: сами по себе это не наш ресёрч, но их часто дописывают к
+# настоящей исследовательской вакансии — «Маркетинговый исследователь /
+# интервьюер (глубинные интервью, CustDev)». Отбрасываем такое название
+# только если в нём нет ни одного сильного исследовательского слова.
+FIELD_ROLE_PATTERNS = _c([
+    r"интервьюер", r"анкетер", r"\bрекрутер\s+респондент",
+])
+
+STRONG_RESEARCH = _c([
+    r"исследовател", r"исследован", r"\bresearch", r"ресерч", r"ресёрч",
+    r"социолог", r"sociolog", r"юзабилити", r"usability",
+    r"\bcustdev\b", r"cust\s*dev", r"кастдев", r"\bux\b", r"\bcx\b",
+    r"глубинн\w*\s+интервью", r"фокус[-\s]?групп",
+])
+
 # Уточнение в скобках или после тире роль не называет.
 _QUALIFIER = re.compile(r"\(.*?\)|\[.*?\]|[—–]\s.*$|\s-\s.*$", re.S)
 
@@ -201,6 +216,8 @@ def classify(title):
     if _hits(STOP_PATTERNS, texts):
         return None
     if _hits(SOFT_STOP_PATTERNS, [main_part(t) for t in texts]):
+        return None
+    if _hits(FIELD_ROLE_PATTERNS, texts) and not _hits(STRONG_RESEARCH, texts):
         return None
     cats = [cid for cid, (_e, _l, pats) in CATEGORIES.items()
             if _hits(pats, texts)]

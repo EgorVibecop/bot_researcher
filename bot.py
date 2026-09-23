@@ -77,7 +77,7 @@ SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "g
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
                 "companies": "Компании", "aviasales": "Aviasales",
-                "dodo": "Dodo Brands", "2gis": "2ГИС"}
+                "dodo": "Dodo Brands", "2gis": "2ГИС", "avito": "Авито"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка по договорённости",
                "hybrid": "гибрид", "office": "офис"}
@@ -439,6 +439,20 @@ async def cmd_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("\nСсылки:\n" + escape("\n".join(links)))
     if apis:
         lines.append("\nAPI в коде страницы:\n" + escape("\n".join(apis)))
+
+    # Кусок разметки вокруг первой вакансии: по нему видно, за что цепляться
+    # парсеру. Без этого сайт, закрытый для нас блокировками, не разобрать.
+    spot = -1
+    for marker in ("data-vacancy", "vacancy-card", "vacancies-section",
+                   "/vacancies/", "ваканс"):
+        spot = text.find(marker)
+        if spot > 0:
+            break
+    if spot > 0:
+        sample = _re.sub(r"\s+", " ", text[max(0, spot - 200):spot + 700])
+        lines.append("\nРазметка вокруг вакансии:\n<code>"
+                     + escape(sample[:900]) + "</code>")
+
     await update.message.reply_text("\n".join(lines)[:4000], parse_mode=ParseMode.HTML)
 
 
