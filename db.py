@@ -256,8 +256,19 @@ def upsert_vacancies(items):
     fresh = []
     for v in items:
         exists = conn.execute(
-            "SELECT 1 FROM vacancies WHERE uid = ?", (v["uid"],)).fetchone()
+            "SELECT relevant, categories FROM vacancies WHERE uid = ?",
+            (v["uid"],)).fetchone()
         if exists:
+            # Фильтр со временем умнеет, а вердикт у старых записей остаётся
+            # прежним - и починка стоп-слова до человека не доезжает. Поэтому
+            # переоцениваем то, что уже лежит в базе.
+            was_relevant = bool(exists["relevant"])
+            now_relevant = bool(v.get("relevant"))
+            cats = ",".join(v.get("categories") or [])
+            if was_relevant != now_relevant or (exists["categories"] or "") != cats:
+                conn.execute(
+                    "UPDATE vacancies SET relevant = ?, categories = ? WHERE uid = ?",
+                    (1 if now_relevant else 0, cats, v["uid"]))
             continue
         # один и тот же текст вакансии часто висит несколькими объявлениями;
         # у удалёнки её ещё и размножают по городам - там город игнорируем
