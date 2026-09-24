@@ -397,6 +397,18 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=MAIN_MENU)
 
 
+async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает Telegram id — по нему настраивается ADMIN_ID."""
+    user = update.effective_user
+    is_admin = ADMIN_ID and str(user.id) == str(ADMIN_ID)
+    await update.message.reply_text(
+        "Твой Telegram id: <code>" + str(user.id) + "</code>\n"
+        "ADMIN_ID у бота: <code>" + escape(str(ADMIN_ID or "не задан")) + "</code>\n"
+        + ("Админские команды доступны." if is_admin
+           else "Админские команды закрыты — id не совпадает."),
+        parse_mode=ParseMode.HTML)
+
+
 async def cmd_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/probe <адрес> — открыть сайт с сервера и рассказать, что там.
 
@@ -404,7 +416,17 @@ async def cmd_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     в Европе его видит, а мы — нет. Команда только для админа: она ходит
     по произвольному адресу, чужим такое давать нельзя.
     """
+    # Раньше команда просто молчала, если id не совпал с ADMIN_ID, и со
+    # стороны это выглядело как «бот сломался». Теперь объясняет, в чём дело,
+    # и сразу показывает id, который надо прописать в настройках.
     if not ADMIN_ID or str(update.effective_user.id) != str(ADMIN_ID):
+        await update.message.reply_text(
+            "Команда только для админа — она ходит по любому адресу.\n\n"
+            "Твой Telegram id: <code>" + str(update.effective_user.id) + "</code>\n"
+            "Сейчас в настройках ADMIN_ID: <code>"
+            + escape(str(ADMIN_ID or "не задан")) + "</code>\n\n"
+            "Пропиши этот id в переменную ADMIN_ID на хостинге и перезапусти бота.",
+            parse_mode=ParseMode.HTML)
         return
     if not context.args:
         await update.message.reply_text("Напиши так: /probe https://job.tochka.com/")
@@ -723,6 +745,9 @@ async def _post_init(app: Application):
         ("stats", "статистика"),
         ("pause", "пауза"),
         ("resume", "продолжить"),
+        ("reset", "прислать всё подходящее заново"),
+        ("whoami", "мой Telegram id"),
+        ("probe", "посмотреть сайт с сервера (админ)"),
         ("help", "справка"),
     ])
 
@@ -757,6 +782,7 @@ def main():
     app.add_handler(CommandHandler("keywords", cmd_keywords))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("probe", cmd_probe))
+    app.add_handler(CommandHandler("whoami", cmd_whoami))
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("reset", cmd_reset))
