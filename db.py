@@ -318,7 +318,12 @@ def unchecked_remote(limit=15, days=30):
         "SELECT uid, source, ext_id, url, work_format FROM vacancies"
         " WHERE relevant = 1 AND IFNULL(remote_checked, 0) = 0"
         " AND IFNULL(work_format, '') NOT LIKE '%remote%'"
-        " AND published_at >= ? ORDER BY published_at DESC LIMIT ?",
+        " AND published_at >= ?"
+        # Сначала те, у кого формат вообще не указан - это LinkedIn и другие
+        # источники, которые его не публикуют. У них шанс найти удалёнку в
+        # тексте высокий, а у офисной вакансии с hh - низкий.
+        " ORDER BY CASE WHEN IFNULL(work_format, '') = '' THEN 0 ELSE 1 END,"
+        " published_at DESC LIMIT ?",
         (since, limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
