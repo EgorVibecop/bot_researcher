@@ -185,7 +185,18 @@ async def collect(sources=None):
         [v for v in items if v.get("relevant") and v["uid"] not in known])
 
     fresh = db.upsert_vacancies(items)
-    logger.info("собрано %s вакансий, новых %s", len(items), len(fresh))
+    # Разбивка по источникам прямо в логе: по ней сразу видно, какой сайт
+    # реально отвечает, а какой молчит из-за блокировок или смены вёрстки.
+    from collections import Counter
+    per_source = Counter(v["source"] for v in items)
+    relevant = Counter(v["source"] for v in items if v.get("relevant"))
+    breakdown = ", ".join(
+        name + " " + str(count) + "/" + str(relevant.get(name, 0))
+        for name, count in per_source.most_common())
+    silent = [s for s in sorted(sources) if s not in per_source and s != "companies"]
+    logger.info("собрано %s вакансий, новых %s | по источникам (всего/по теме): %s%s",
+                len(items), len(fresh), breakdown,
+                " | молчат: " + ", ".join(silent) if silent else "")
     return items, fresh
 
 

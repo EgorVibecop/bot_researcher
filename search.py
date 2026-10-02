@@ -657,6 +657,17 @@ LI_DATE = re.compile(r'<time[^>]*datetime="([^"]+)"')
 LINKEDIN_LOCATIONS = [loc.strip() for loc in os.getenv(
     "LINKEDIN_LOCATIONS", "Russian Federation,Worldwide").split(",") if loc.strip()]
 LI_PAGES = 3            # выдача отдаёт по 10 вакансий на страницу
+_li_turn = 0
+
+
+def _linkedin_next(queries):
+    """Следующая пара «запрос + локация» по кругу - одна на цикл сбора."""
+    global _li_turn
+    pairs = [(q, loc) for q in (queries or ["researcher"])
+             for loc in LINKEDIN_LOCATIONS]
+    query, location = pairs[_li_turn % len(pairs)]
+    _li_turn += 1
+    return query, location
 
 
 async def fetch_linkedin(client, query, location="Russian Federation",
@@ -1110,8 +1121,12 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
         if "tg" in sources and tg_source.configured():
             tasks.append(tg_source.fetch_telegram(client, habr_queries))
         if "linkedin" in sources:
-            tasks += [fetch_linkedin(client, q, location=loc, period_days=period)
-                      for q in habr_queries for loc in LINKEDIN_LOCATIONS]
+            # С адресов хостинга LinkedIn отвечает 429 почти на каждый
+            # запрос, а мы просили у него 24 страницы за цикл. Теперь за
+            # цикл берём одну пару «запрос + локация», по кругу: полный
+            # круг проходит за несколько часов, зато без отказов.
+            tasks.append(fetch_linkedin(client, *_linkedin_next(habr_queries),
+                                        period_days=period))
         if "companies" in sources:
             tasks += [fetch_hh_employer(client, eid, period=period)
                       for eid in HH_EMPLOYERS]
