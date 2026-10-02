@@ -346,6 +346,7 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
                 logger.info("не смог прочитать описание %s: %s %s",
                             vac["uid"], type(exc).__name__, exc)
                 continue
+            vac["remote_checked"] = True
             if description and remote_mentioned(description):
                 formats = [f for f in (vac.get("work_format") or "").split(",") if f]
                 formats.append("remote_maybe")

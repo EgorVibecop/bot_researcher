@@ -104,6 +104,7 @@ def init_db():
             experience TEXT,
             categories TEXT,
             relevant INTEGER DEFAULT 0,
+            remote_checked INTEGER DEFAULT 0,
             first_seen TEXT
         );
 
@@ -138,6 +139,10 @@ def init_db():
 
 def _migrate(conn):
     """Дописывает колонки, появившиеся после первого запуска бота."""
+    vac_have = {row["name"] for row in conn.execute("PRAGMA table_info(vacancies)")}
+    if "remote_checked" not in vac_have:
+        conn.execute("ALTER TABLE vacancies ADD COLUMN remote_checked INTEGER DEFAULT 0")
+
     have = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     columns = {
         "work_formats": "TEXT DEFAULT 'remote'",
@@ -286,17 +291,49 @@ def upsert_vacancies(items):
         conn.execute(
             "INSERT INTO vacancies (uid, source, ext_id, title, company, area, url,"
             " published_at, salary_from, salary_to, currency, work_format, experience,"
-            " categories, relevant, first_seen)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " categories, relevant, first_seen, remote_checked)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (v["uid"], v["source"], v["ext_id"], v["title"], v["company"], v["area"],
              v["url"], v["published_at"], v.get("salary_from"), v.get("salary_to"),
              v.get("currency", ""), v.get("work_format", ""), v.get("experience", ""),
-             ",".join(v.get("categories") or []), 1 if v.get("relevant") else 0, stamp),
+             ",".join(v.get("categories") or []), 1 if v.get("relevant") else 0, stamp,
+             1 if v.get("remote_checked") else 0),
         )
         fresh.append(v)
     conn.commit()
     conn.close()
     return fresh
+
+
+def unchecked_remote(limit=15, days=30):
+    """Подходящие вакансии без удалёнки, у которых мы ещё не читали описание.
+
+    Нужно для накопленного: обогащение формата идёт только по свежим
+    находкам, а весь LinkedIn уже лежал в базе с пустым форматом и из-за
+    этого не доезжал до тех, у кого стоит «только удалёнка».
+    """
+    since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT uid, source, ext_id, url, work_format FROM vacancies"
+        " WHERE relevant = 1 AND IFNULL(remote_checked, 0) = 0"
+        " AND IFNULL(work_format, '') NOT LIKE '%remote%'"
+        " AND published_at >= ? ORDER BY published_at DESC LIMIT ?",
+        (since, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_formats(items):
+    """Сохраняет формат после чтения описания и отмечает вакансию проверенной."""
+    if not items:
+        return
+    conn = get_conn()
+    conn.executemany(
+        "UPDATE vacancies SET work_format = ?, remote_checked = 1 WHERE uid = ?",
+        [(v.get("work_format") or "", v["uid"]) for v in items])
+    conn.commit()
+    conn.close()
 
 
 def known_uids(uids):
