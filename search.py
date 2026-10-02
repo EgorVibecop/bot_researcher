@@ -275,6 +275,12 @@ REMOTE_IN_TEXT = re.compile(
     r"|из\s+люб(?:ой\s+точки|ого\s+города)"
     r"|work\s+from\s+anywhere"
     r"|remote\s+(?:is\s+)?possible"
+    # английские формулировки - нужны для LinkedIn, он формат работы
+    # в выдаче не отдаёт, зато пишет его на странице вакансии
+    r"|workplace\s*type[^.]{0,40}remote"
+    r"|\bfully\s+remote\b|\b100%\s*remote\b"
+    r"|\bremote\s+(?:work|position|role|job|friendly)\b"
+    r"|\bwork\s+remotely\b"
     r"|(?:full[\s-]?)?remote\s+option",
     re.IGNORECASE)
 
@@ -319,9 +325,11 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
     Дорого (по запросу на вакансию), поэтому вызывается только для новых
     подходящих вакансий и не больше limit штук за цикл.
     """
+    # Раньше смотрели только hh, и из-за этого терялся весь LinkedIn: он
+    # формат работы в выдаче вообще не публикует, пустой формат считался
+    # офисом, и при фильтре «только удалёнка» вакансии молча отсеивались.
     targets = [v for v in items
-               if v.get("source") == "hh"
-               and "remote" not in (v.get("work_format") or "")][:limit]
+               if v.get("url") and "remote" not in (v.get("work_format") or "")][:limit]
     if not targets:
         return 0
 
@@ -329,7 +337,11 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for vac in targets:
             try:
-                description = await fetch_hh_description(client, vac["ext_id"])
+                if vac.get("source") == "hh":
+                    description = await fetch_hh_description(client, vac["ext_id"])
+                else:
+                    resp = await client.get(vac["url"], headers={"User-Agent": UA})
+                    description = resp.text if resp.status_code == 200 else ""
             except Exception as exc:
                 logger.info("не смог прочитать описание %s: %s %s",
                             vac["uid"], type(exc).__name__, exc)

@@ -80,8 +80,9 @@ SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "g
                 "dodo": "Dodo Brands", "2gis": "2ГИС", "avito": "Авито"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка по договорённости",
+               "unknown": "формат не указан",
                "hybrid": "гибрид", "office": "офис"}
-WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office"]
+WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office", "unknown"]
 # в настройках выбираются только эти три: remote_maybe навешивает сам бот,
 # когда находит обещание удалёнки в тексте вакансии
 SETTING_FORMATS = ["remote", "hybrid", "office"]
@@ -181,6 +182,9 @@ async def collect(sources=None):
     # там часто «возможна удалёнка» или «формат обсуждается». Читаем только
     # те, которых ещё нет в базе, — старые уже проверены.
     known = db.known_uids([v["uid"] for v in items])
+    # Сюда попадают все источники, а не только hh: LinkedIn формат работы
+    # не публикует вовсе, и без этого прохода его вакансии не доезжали до
+    # тех, у кого стоит «только удалёнка».
     await search.enrich_remote(
         [v for v in items if v.get("relevant") and v["uid"] not in known])
 

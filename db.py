@@ -494,7 +494,9 @@ def matches_user(vac, st, includes, excludes, muted):
         if not rescued:
             return False
 
-    formats = set(f for f in (vac.get("work_format") or "").split(",") if f) or {"office"}
+    # Пустой формат - это не офис, а «источник его не сообщил» (так приходит
+    # весь LinkedIn). Разводим эти случаи, чтобы не выдавать догадку за факт.
+    formats = set(f for f in (vac.get("work_format") or "").split(",") if f) or {"unknown"}
     area = (vac.get("area") or "").lower()
 
     wanted_formats = set(
@@ -503,6 +505,8 @@ def matches_user(vac, st, includes, excludes, muted):
     # удалёнку) засчитывается тому, кто просил удалёнку
     if "remote" in wanted_formats:
         wanted_formats.add("remote_maybe")
+    if "office" in wanted_formats:
+        wanted_formats.add("unknown")
     if wanted_formats and not formats & wanted_formats:
         return False
 
