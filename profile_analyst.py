@@ -159,7 +159,9 @@ LINKEDIN_QUERIES = [
 ]
 
 # Каналы, у которых включён веб-просмотр (проверено)
-TG_CHANNELS = ["analytics_jobs", "data_analyst_jobs", "analyst_job", "datasciencejobs"]
+TG_CHANNELS = ["analytics_jobs", "data_analyst_jobs", "analyst_job",
+               "datasciencejobs", "data_vacancy", "careerspace",
+               "remote_it_jobs", "it_jobs_rus"]
 
 # --- 5. Форматы работы ----------------------------------------------------
 # Полный офис человеку не нужен вовсе: в настройках его нет, а вакансии

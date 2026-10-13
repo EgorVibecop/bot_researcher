@@ -324,7 +324,8 @@ PROFILE = os.getenv("PROFILE", "researcher").strip().lower()
 TITLE = "Радар вакансий для исследователей"
 DEFAULT_WORK_FORMATS = "remote"
 SETTING_FORMATS = ["remote", "hybrid", "office"]
-TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters"]
+TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters",
+               "careerspace", "remote_it_jobs", "it_jobs_rus"]
 # Маркер IT-аккредитации нужен только аналитику.
 SHOW_IT_ACCRED = False
 EMPLOYER_QUERY = (

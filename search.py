@@ -20,6 +20,7 @@
 """
 
 import asyncio
+import hashlib
 import html as html_mod
 import json
 import logging
@@ -1220,6 +1221,121 @@ def _augment_formats(item):
     return item
 
 
+# ------------------------------------------------------- карьерные сайты IT
+
+# Разделы «вакансии» на сайтах IT-компаний. Разметка у всех своя, поэтому
+# разбираем двумя общими способами: сначала JSON-LD (schema.org JobPosting),
+# который отдаёт половина современных сайтов, потом — ссылки на карточки
+# вакансий. Название вакансии всё равно проходит общий фильтр, так что
+# пункты меню вроде «Стажировки» отсеются сами.
+CAREER_PAGES = [
+    ("Selectel", "https://selectel.ru/careers/all/"),
+    ("Ozon", "https://job.ozon.ru/vacancy/"),
+    ("Т-Банк", "https://career.tbank.ru/vacancies"),
+    ("VK", "https://jobs.vk.company/vacancy/"),
+    ("Wildberries", "https://career.wildberries.ru/vacancies"),
+    ("Lamoda", "https://jobs.lamoda.ru/vacancy"),
+    ("Самокат", "https://job.samokat.ru/vacancies"),
+    ("Купер", "https://career.kuper.ru/vacancies"),
+    ("X5", "https://x5.ru/ru/career/vacancies/"),
+    ("Skyeng", "https://vacancies.skyeng.ru/"),
+    ("Яндекс", "https://yandex.ru/jobs/vacancies"),
+    ("Контур", "https://kontur.ru/career/vacancies"),
+    ("Positive Technologies", "https://www.ptsecurity.com/ru-ru/about/vacancies/"),
+]
+
+LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
+# Ссылка именно на карточку вакансии, а не на раздел: после vacancy/job
+# должен быть ещё один кусок пути - идентификатор.
+CAREER_LINK = re.compile(
+    r'<a[^>]+href="([^"#]*/(?:vacanc(?:y|ies)|vakansii|job|jobs|career)s?/[^"#?]+)"[^>]*>(.*?)</a>',
+    re.S | re.I)
+
+
+def _ld_jobs(text):
+    """Вакансии из разметки schema.org, если сайт её отдаёт."""
+    out = []
+    for block in LD_BLOCK.findall(text):
+        try:
+            data = json.loads(block.strip())
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = data["@graph"]
+        for raw in items:
+            if not isinstance(raw, dict) or raw.get("@type") != "JobPosting":
+                continue
+            loc = raw.get("jobLocation") or {}
+            if isinstance(loc, list):
+                loc = loc[0] if loc else {}
+            addr = (loc or {}).get("address") or {}
+            out.append({
+                "title": _strip_tags(str(raw.get("title") or "")),
+                "url": raw.get("url") or "",
+                "area": str(addr.get("addressLocality") or "") if isinstance(addr, dict) else "",
+                "published_at": (raw.get("datePosted") or None),
+            })
+    return out
+
+
+def _page_links(text, base):
+    """Запасной разбор: ссылки, похожие на карточки вакансий."""
+    from urllib.parse import urljoin
+
+    out, seen = [], set()
+    for href, inner in CAREER_LINK.findall(text):
+        title = _strip_tags(inner)
+        if not (5 < len(title) < 90) or title.lower() in _CAREER_NOISE:
+            continue
+        url = urljoin(base, href)
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append({"title": title, "url": url, "area": "", "published_at": None})
+    return out
+
+
+_CAREER_NOISE = {"вакансии", "все вакансии", "стажировки", "карьера", "подробнее",
+                 "вакансия", "смотреть вакансии", "открытые вакансии", "jobs",
+                 "vacancies", "все вакансии →", "хочу в команду"}
+
+
+async def fetch_careers(client):
+    """Обходит карьерные разделы IT-компаний."""
+    out = []
+    for company, url in CAREER_PAGES:
+        try:
+            resp = await client.get(url, headers={"User-Agent": UA})
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.info("careers %s: страница не открылась: %s %s",
+                        company, type(exc).__name__, exc)
+            continue
+        found = _ld_jobs(resp.text) or _page_links(resp.text, str(resp.url))
+        for raw in found:
+            if not raw["title"] or not raw["url"]:
+                continue
+            vid = hashlib.md5(raw["url"].encode("utf-8")).hexdigest()[:12]
+            out.append({
+                "uid": "careers:" + vid,
+                "source": "careers",
+                "ext_id": vid,
+                "title": raw["title"],
+                "company": company,
+                "area": raw["area"],
+                "url": raw["url"],
+                "published_at": raw["published_at"],
+                "salary_from": None,
+                "salary_to": None,
+                "currency": "RUR",
+                "work_format": "",
+                "experience": "",
+            })
+        logger.info("careers %s: карточек %s", company, len(found))
+    return out
+
+
 async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
                     linkedin_queries=None):
     """Опрашивает включённые источники и возвращает вакансии без дублей."""
@@ -1262,6 +1378,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
             tasks.append(fetch_dodo(client))
             tasks.append(fetch_2gis(client))
             tasks.append(fetch_avito(client))
+            tasks.append(fetch_careers(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []

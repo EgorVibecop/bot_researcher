@@ -79,7 +79,8 @@ SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "g
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
                 "companies": "Компании", "aviasales": "Aviasales",
-                "dodo": "Dodo Brands", "2gis": "2ГИС", "avito": "Авито"}
+                "dodo": "Dodo Brands", "2gis": "2ГИС", "avito": "Авито",
+                "careers": "Карьерные сайты"}
 CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYR": "Br"}
 WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка по договорённости",
                "unknown": "формат не указан",
