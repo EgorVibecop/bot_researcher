@@ -85,7 +85,8 @@ WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка �
 WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office", "unknown"]
 # в настройках выбираются только эти три: remote_maybe навешивает сам бот,
 # когда находит обещание удалёнки в тексте вакансии
-SETTING_FORMATS = ["remote", "hybrid", "office"]
+# Список зависит от профиля: аналитику полный офис не нужен вовсе.
+SETTING_FORMATS = matching.SETTING_FORMATS
 
 
 def format_names(value):
@@ -142,6 +143,10 @@ def format_vacancy(vac):
     note = (vac.get("remote_note") or "").strip()
     if note and "remote_maybe" in (vac.get("work_format") or ""):
         lines.append("<i>«" + escape(note[:110]) + "»</i>")
+    # IT-аккредитация: читаем из описания, молчание — это «нет информации».
+    accred = (vac.get("it_accred") or "").strip()
+    lines.append("🏛 IT-аккредитация: " + {"yes": "да", "no": "нет"}.get(
+        accred, "нет информации"))
     # Зарплату пишем всегда: её отсутствие — тоже информация о вакансии.
     lines.append("💰 " + (salary_line(vac) or "не указана"))
 
@@ -177,6 +182,7 @@ async def collect(sources=None):
     items = await search.fetch_all(
         sources, matching.HH_QUERIES, matching.HABR_QUERIES,
         area=113, period=SEARCH_PERIOD_DAYS,
+        linkedin_queries=matching.LINKEDIN_QUERIES,
     )
     for vac in items:
         cats = matching.classify(vac["title"])
@@ -340,13 +346,9 @@ async def poll_loop(app):
 # -------------------------------------------------------------- обработчики
 
 WELCOME = (
-    "🔎 <b>Радар вакансий для исследователей</b>\n\n"
-    "Слежу за hh.ru, Хабр Карьерой и getmatch и присылаю новые вакансии:\n"
-    "UX / CX / Product / Market Research, исследователь пользовательского и "
-    "клиентского опыта, социолог, продуктовый исследователь, CustDev.\n\n"
-    "Ищу строго по названию вакансии, аналитику данных и продажи отсекаю.\n"
-    "По умолчанию присылаю <b>только удалёнку</b> — офис и гибрид включаются "
-    "в настройках.\n\n"
+    "🔎 <b>" + matching.TITLE + "</b>\n\n"
+    # Описание того, что именно бот ищет, зависит от профиля
+    + matching.WELCOME_BODY +
     "Проверяю раз в {interval} мин. Каждая вакансия приходит один раз.\n\n"
     "⚙️ Настройки — формат работы, регион, минимальная зарплата, категории.\n"
     "🔑 Ключевые слова — добавить своё или отсечь лишнее.\n"

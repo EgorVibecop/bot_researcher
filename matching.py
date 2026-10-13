@@ -10,6 +10,7 @@
      по ним пользователь фильтрует ленту в настройках.
 """
 
+import os
 import re
 
 
@@ -311,3 +312,47 @@ HABR_QUERIES = [
     "researcher",
     "продуктовый исследователь",
 ]
+
+# --- Профили -------------------------------------------------------------
+# Один и тот же код обслуживает двух ботов: радар для исследователей и радар
+# для аналитиков. Логика отбора общая, различаются только слова и запросы.
+# Профиль выбирается переменной окружения PROFILE; без неё всё работает
+# ровно как раньше - это профиль исследователя.
+
+PROFILE = os.getenv("PROFILE", "researcher").strip().lower()
+
+TITLE = "Радар вакансий для исследователей"
+DEFAULT_WORK_FORMATS = "remote"
+SETTING_FORMATS = ["remote", "hybrid", "office"]
+TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters"]
+WELCOME_BODY = (
+    "Слежу за hh.ru, Хабр Карьерой, getmatch, LinkedIn, сайтами компаний и тг-каналами:\n"
+    "UX / CX / Product / Market Research, исследователь опыта, социолог, CustDev.\n\n"
+    "Ищу строго по названию вакансии, аналитику данных и продажи отсекаю.\n"
+    "По умолчанию присылаю <b>только удалёнку</b> — офис и гибрид включаются в настройках.\n\n"
+)
+
+LINKEDIN_QUERIES = HABR_QUERIES
+
+if PROFILE == "analyst":
+    import profile_analyst as _p
+
+    TITLE = _p.TITLE
+    RESEARCH_CORE = _c(_p.CORE)
+    STOP_PATTERNS = _c(_p.STOP)
+    SOFT_STOP_PATTERNS = _c(_p.SOFT_STOP)
+    FIELD_ROLE_PATTERNS = _c(_p.FIELD_ROLES)
+    STRONG_RESEARCH = _c(_p.STRONG)
+    CATEGORIES = {cid: (emoji, label, _c(pats))
+                  for cid, (emoji, label, pats) in _p.CATEGORIES.items()}
+    GENERIC = _p.GENERIC
+    ALL_CATEGORY_IDS = list(CATEGORIES.keys()) + ["research"]
+    DOMAIN_MARKERS = _c(_p.DOMAIN)
+    ROLE_MARKERS = _c(_p.ROLE)
+    HH_QUERIES = _p.HH_QUERIES
+    HABR_QUERIES = _p.HABR_QUERIES
+    LINKEDIN_QUERIES = _p.LINKEDIN_QUERIES
+    TG_CHANNELS = _p.TG_CHANNELS
+    DEFAULT_WORK_FORMATS = _p.DEFAULT_WORK_FORMATS
+    SETTING_FORMATS = _p.SETTING_FORMATS
+    WELCOME_BODY = _p.WELCOME_BODY

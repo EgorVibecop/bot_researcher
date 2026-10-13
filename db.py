@@ -17,15 +17,19 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import matching
+
 MSK = timezone(timedelta(hours=3))
 
 DB_PATH = Path(os.getenv("DB_PATH") or (Path(__file__).parent / "jobs.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_CATEGORIES = "ux,cx,product,marketing,socio,research"
+# Категории и формат работы зависят от профиля: у исследователя одни,
+# у аналитика другие (и офиса в списке нет вовсе).
+DEFAULT_CATEGORIES = ",".join(matching.ALL_CATEGORY_IDS)
 DEFAULT_SOURCES = "hh,habr,getmatch,geekjob,itone,superjob,tg,linkedin,companies"
 
-DEFAULT_WORK_FORMATS = "remote"     # remote | hybrid | office, через запятую
+DEFAULT_WORK_FORMATS = matching.DEFAULT_WORK_FORMATS
 
 SETTINGS_DEFAULTS = {
     "region": "any",            # any | msk | spb
@@ -107,6 +111,7 @@ def init_db():
             remote_checked INTEGER DEFAULT 0,
             closed INTEGER DEFAULT 0,
             remote_note TEXT,
+            it_accred TEXT,
             first_seen TEXT
         );
 
@@ -148,6 +153,8 @@ def _migrate(conn):
         conn.execute("ALTER TABLE vacancies ADD COLUMN closed INTEGER DEFAULT 0")
     if "remote_note" not in vac_have:
         conn.execute("ALTER TABLE vacancies ADD COLUMN remote_note TEXT")
+    if "it_accred" not in vac_have:
+        conn.execute("ALTER TABLE vacancies ADD COLUMN it_accred TEXT")
 
     have = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     columns = {
@@ -297,13 +304,14 @@ def upsert_vacancies(items):
         conn.execute(
             "INSERT INTO vacancies (uid, source, ext_id, title, company, area, url,"
             " published_at, salary_from, salary_to, currency, work_format, experience,"
-            " categories, relevant, first_seen, remote_checked, remote_note)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " categories, relevant, first_seen, remote_checked, remote_note, it_accred)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (v["uid"], v["source"], v["ext_id"], v["title"], v["company"], v["area"],
              v["url"], v["published_at"], v.get("salary_from"), v.get("salary_to"),
              v.get("currency", ""), v.get("work_format", ""), v.get("experience", ""),
              ",".join(v.get("categories") or []), 1 if v.get("relevant") else 0, stamp,
-             1 if v.get("remote_checked") else 0, v.get("remote_note")),
+             1 if v.get("remote_checked") else 0, v.get("remote_note"),
+             v.get("it_accred")),
         )
         fresh.append(v)
     conn.commit()
@@ -381,7 +389,6 @@ def unchecked_remote(limit=15, days=30):
     rows = conn.execute(
         "SELECT uid, source, ext_id, url, work_format FROM vacancies"
         " WHERE relevant = 1 AND IFNULL(remote_checked, 0) = 0"
-        " AND IFNULL(work_format, '') NOT LIKE '%remote%'"
         " AND published_at >= ?"
         # Сначала те, у кого формат вообще не указан - это LinkedIn и другие
         # источники, которые его не публикуют. У них шанс найти удалёнку в
@@ -399,9 +406,10 @@ def save_formats(items):
         return
     conn = get_conn()
     conn.executemany(
-        "UPDATE vacancies SET work_format = ?, remote_checked = 1, remote_note = ?"
-        " WHERE uid = ?",
-        [(v.get("work_format") or "", v.get("remote_note"), v["uid"]) for v in items])
+        "UPDATE vacancies SET work_format = ?, remote_checked = 1, remote_note = ?,"
+        " it_accred = ? WHERE uid = ?",
+        [(v.get("work_format") or "", v.get("remote_note"), v.get("it_accred"),
+          v["uid"]) for v in items])
     conn.commit()
     conn.close()
 

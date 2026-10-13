@@ -354,6 +354,38 @@ def remote_mentioned(text):
     return None
 
 
+# --------------------------------------------------------- IT-аккредитация
+
+# Про аккредитацию компании в Минцифры пишут по-разному: «аккредитованная
+# IT-компания», «компания с IT-аккредитацией», «есть аккредитация Минцифры»,
+# «accredited IT company». Ловим все формы написания.
+IT_ACCRED = re.compile(
+    r"(?:ай[\s-]?ти|\bit\b|\bит\b)[\s-]{0,3}аккредит"
+    r"|аккредит\w*\s+(?:\w+\s+){0,3}(?:ай[\s-]?ти|\bit\b|\bит\b)"
+    r"|аккредит\w*\s+(?:\w+\s+){0,2}минцифр"
+    r"|минцифр\w*[^.]{0,40}аккредит"
+    r"|аккредитованн\w+\s+(?:компания|компании|организация|работодател)"
+    r"|аккредитац\w+\s+(?:компании|организации)"
+    r"|государствен\w+\s+аккредитац\w+\s+(?:в\s+сфере\s+)?(?:ит|информационных)"
+    r"|accredited\s+it\b|it\s+accreditation",
+    re.IGNORECASE)
+
+# Прямое отрицание: отвечаем «нет», а не «нет информации».
+ACCRED_DENIAL = re.compile(
+    r"не\s+аккредитован|нет\s+(?:ит|it|ай[\s-]?ти)[\s-]?аккредитац"
+    r"|аккредитаци\w*\s+нет|без\s+(?:ит|it|ай[\s-]?ти)[\s-]?аккредитац"
+    r"|no\s+it\s+accreditation",
+    re.IGNORECASE)
+
+
+def it_accredited(text):
+    """«yes» — аккредитация есть, «no» — её прямо отрицают, None — молчат."""
+    plain = _strip_tags(text)
+    if ACCRED_DENIAL.search(plain):
+        return "no"
+    return "yes" if IT_ACCRED.search(plain) else None
+
+
 async def fetch_hh_description(client, vacancy_id):
     resp = await _hh_get(client, "https://hh.ru/vacancy/" + str(vacancy_id),
                          {}, {"User-Agent": UA})
@@ -376,12 +408,14 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
     # Раньше смотрели только hh, и из-за этого терялся весь LinkedIn: он
     # формат работы в выдаче вообще не публикует, пустой формат считался
     # офисом, и при фильтре «только удалёнка» вакансии молча отсеивались.
+    # Описание читаем у всех непроверенных, а не только у «не удалёнки»:
+    # помимо скрытой удалёнки оттуда же берём маркер IT-аккредитации.
     targets = [v for v in items
-               if v.get("url") and "remote" not in (v.get("work_format") or "")][:limit]
+               if v.get("url") and not v.get("remote_checked")][:limit]
     if not targets:
         return 0
 
-    found = 0
+    found = accred = 0
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         for vac in targets:
             try:
@@ -395,6 +429,10 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
                             vac["uid"], type(exc).__name__, exc)
                 continue
             vac["remote_checked"] = True
+            if description:
+                vac["it_accred"] = it_accredited(description) or ""
+                if vac["it_accred"] == "yes":
+                    accred += 1
             quote = remote_mentioned(description) if description else None
             if quote:
                 formats = [f for f in (vac.get("work_format") or "").split(",") if f]
@@ -402,8 +440,8 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
                 vac["work_format"] = ",".join(dict.fromkeys(formats))
                 vac["remote_note"] = quote[:200]
                 found += 1
-    logger.info("описаний прочитано %s, скрытой удалёнки найдено %s",
-                len(targets), found)
+    logger.info("описаний прочитано %s, скрытой удалёнки найдено %s,"
+                " с IT-аккредитацией %s", len(targets), found, accred)
     return found
 
 
@@ -1157,7 +1195,8 @@ def _augment_formats(item):
     return item
 
 
-async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
+async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
+                    linkedin_queries=None):
     """Опрашивает включённые источники и возвращает вакансии без дублей."""
     tasks = []
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
@@ -1188,7 +1227,8 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7):
             # запрос, а мы просили у него 24 страницы за цикл. Теперь за
             # цикл берём одну пару «запрос + локация», по кругу: полный
             # круг проходит за несколько часов, зато без отказов.
-            tasks.append(fetch_linkedin(client, *_linkedin_next(habr_queries),
+            tasks.append(fetch_linkedin(client,
+                                        *_linkedin_next(linkedin_queries or habr_queries),
                                         period_days=period))
         if "companies" in sources:
             tasks += [fetch_hh_employer(client, eid, period=period)

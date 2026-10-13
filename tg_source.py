@@ -57,7 +57,11 @@ _OFFICE = re.compile(r"\bофис|on-?site|в офисе", re.I)
 
 
 def channels():
-    return [c.strip().lstrip("@") for c in os.getenv("TG_CHANNELS", "").split(",")
+    # Без переменной берём каналы профиля: у исследователей свои, у
+    # аналитиков свои. TG_CHANNELS, если задана, перебивает их.
+    import matching
+    env = os.getenv("TG_CHANNELS", "") or ",".join(matching.TG_CHANNELS)
+    return [c.strip().lstrip("@") for c in env.split(",")
             if c.strip()]
 
 
