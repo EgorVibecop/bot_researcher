@@ -168,6 +168,12 @@ def _migrate(conn):
     # «все»: 0 значит отдавать всё подходящее сразу.
     conn.execute("UPDATE users SET max_per_run = 0 WHERE max_per_run IN (8, 15)")
 
+    # Фильтры по зарплате, региону и категориям убраны из настроек: они
+    # молча резали ленту (порог в 300 тысяч отсекал почти всё). Сбрасываем
+    # их у тех, кто успел выставить.
+    conn.execute("UPDATE users SET min_salary = 0, region = 'any',"
+                 " include_no_salary = 1, categories = ?", (DEFAULT_CATEGORIES,))
+
     # Цитаты, вырезанные из разметки страницы, нечитаемы: чистим один раз,
     # при следующей проверке описания бот подставит нормальную фразу.
     conn.execute("UPDATE vacancies SET remote_note = NULL, remote_checked = 0"

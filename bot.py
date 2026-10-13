@@ -712,18 +712,12 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------------------------------------------------- настройки
 
 def settings_text(st):
-    cats = [c for c in (st["categories"] or "").split(",") if c]
-    cat_names = ", ".join(matching.category_label(c)[1] for c in cats) or "все"
     srcs = db.active_sources(st)
     return (
         "⚙️ <b>Настройки</b>\n\n"
-        "Регион: <b>" + REGIONS.get(st["region"], "Вся Россия") + "</b>\n"
         "Формат работы: <b>" + (format_names(st["work_formats"]) or "любой") + "</b>\n"
-        "Минимальная зарплата: <b>" +
-        (money(st["min_salary"], "RUR") if st["min_salary"] else "не важно") + "</b>\n"
-        "Вакансии без зарплаты: <b>" +
-        ("показывать" if st["include_no_salary"] else "скрывать") + "</b>\n"
-        "Категории: <b>" + cat_names + "</b>\n"
+        "За одну отправку: <b>" + (str(int(st["max_per_run"])) + " шт."
+                                   if st["max_per_run"] else "все") + "</b>\n"
         "Источники: <b>" + ", ".join(SOURCE_NAMES.get(s, s) for s in srcs) + "</b>\n"
         "Режим: <b>" + ("дайджест в " + str(st["digest_hour"]) + ":00"
                         if st["mode"] == "digest" else "присылать сразу") + "</b>\n"
@@ -736,32 +730,16 @@ def settings_keyboard(st):
     srcs = set(db.active_sources(st))
     mark = lambda on: "✅ " if on else "▫️ "
 
-    rows = [[InlineKeyboardButton(
-        ("🔘 " if st["region"] == key else "") + name, callback_data="s:region:" + key)
-        for key, name in REGIONS.items()]]
+    # Фильтры, кроме формата работы, убраны намеренно: зарплата, регион и
+    # категории резали ленту молча, а человеку нужны все подходящие вакансии.
     formats = set(f for f in (st["work_formats"] or "").split(",") if f)
-    rows.append([InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
-                                      callback_data="wf:" + f)
-                 for f in SETTING_FORMATS])
-    rows.append([
-        InlineKeyboardButton(mark(st["include_no_salary"]) + "вакансии без ЗП",
-                             callback_data="s:include_no_salary:" +
-                             str(0 if st["include_no_salary"] else 1)),
-    ])
-    rows.append([InlineKeyboardButton(
-        "💰 от " + (money(st["min_salary"], "RUR") if st["min_salary"] else "любой"),
-        callback_data="s:min_salary:next")])
+    rows = [[InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
+                                  callback_data="wf:" + f)
+             for f in SETTING_FORMATS]]
     rows.append([InlineKeyboardButton(
         "📦 за раз: " + (str(int(st["max_per_run"])) + " шт."
                         if st["max_per_run"] else "все"),
         callback_data="s:max_per_run:next")])
-
-    cat_row = []
-    for cid in matching.ALL_CATEGORY_IDS:
-        emoji, label = matching.category_label(cid)
-        cat_row.append(InlineKeyboardButton(
-            mark(cid in cats) + emoji + " " + label, callback_data="cat:" + cid))
-    rows += [cat_row[i:i + 2] for i in range(0, len(cat_row), 2)]
 
     rows.append([InlineKeyboardButton(mark(s in srcs) + SOURCE_NAMES[s],
                                       callback_data="src:" + s)
