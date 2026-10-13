@@ -18,6 +18,7 @@ Research, социолог, исследователь пользователь�
 """
 
 import asyncio
+from collections import Counter
 import logging
 import os
 import sys
@@ -244,7 +245,6 @@ async def collect(sources=None):
         db.save_formats(stale)
     # Разбивка по источникам прямо в логе: по ней сразу видно, какой сайт
     # реально отвечает, а какой молчит из-за блокировок или смены вёрстки.
-    from collections import Counter
     per_source = Counter(v["source"] for v in items)
     relevant = Counter(v["source"] for v in items if v.get("relevant"))
     breakdown = ", ".join(
@@ -266,6 +266,17 @@ def user_filters(user_id):
         db.get_keywords(user_id, "exclude"),
         set(db.get_muted(user_id)),
     )
+
+
+def queue_reasons(st):
+    """Почему свежие вакансии не попали в очередь — по пунктам."""
+    includes, excludes, muted = user_filters(st["user_id"])
+    counts = Counter()
+    for vac in db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS, limit=3000):
+        reason = db.match_reason(vac, st, includes, excludes, muted)
+        if reason:
+            counts[reason] += 1
+    return ", ".join(name + " " + str(n) for name, n in counts.most_common()) or "ничего"
 
 
 def pick_for_user(st, limit=None):
@@ -686,6 +697,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Подходящих вакансий в базе: " + str(s["in_base"]) + "\n"
         "Появилось за сутки: " + str(s["fresh_day"]) + "\n"
         "В очереди именно вам: <b>" + str(len(pick_for_user(st))) + "</b>\n"
+        + "Отсеяно вашими настройками: " + queue_reasons(st) + "\n"
         + ("Последняя проверка: " + LAST_CYCLE["at"] + ", собрано " +
            str(LAST_CYCLE["collected"]) + ", из них новых " +
            str(LAST_CYCLE["fresh"]) + "\n" if LAST_CYCLE else

@@ -618,15 +618,24 @@ def user_stats(user_id):
 
 def matches_user(vac, st, includes, excludes, muted):
     """Проходит ли вакансия личные фильтры пользователя."""
+    return match_reason(vac, st, includes, excludes, muted) is None
+
+
+def match_reason(vac, st, includes, excludes, muted):
+    """None, если вакансия подходит, иначе короткая причина отказа.
+
+    Нужна, чтобы на вопрос «почему в очереди пусто» бот отвечал цифрами,
+    а не догадками.
+    """
     title = (vac.get("title") or "").lower()
 
     for word in excludes:
         if word and word in title:
-            return False
+            return "стоп-слово"
 
     company = (vac.get("company") or "").lower()
     if company and company in muted:
-        return False
+        return "скрытая компания"
 
     cats = [c for c in (vac.get("categories") or "").split(",") if c]
     # пустой список в настройках читаем как «все» - иначе лента молчит
@@ -636,10 +645,10 @@ def matches_user(vac, st, includes, excludes, muted):
 
     if not vac.get("relevant"):
         if not rescued:
-            return False
+            return "не по теме"
     elif cats and not set(cats) & set(wanted):
         if not rescued:
-            return False
+            return "выключенная категория"
 
     # Пустой формат - это не офис, а «источник его не сообщил» (так приходит
     # весь LinkedIn). Разводим эти случаи, чтобы не выдавать догадку за факт.
@@ -658,12 +667,12 @@ def matches_user(vac, st, includes, excludes, muted):
     if "office" in wanted_formats or "office" not in matching.SETTING_FORMATS:
         wanted_formats.add("unknown")
     if wanted_formats and not formats & wanted_formats:
-        return False
+        return "формат работы"
 
     region = st.get("region") or "any"
     if region in MSK_CITY and not formats & {"remote", "remote_maybe"}:
         if not any(city in area for city in MSK_CITY[region]):
-            return False
+            return "регион"
 
     s_from = vac.get("salary_from") or 0
     s_to = vac.get("salary_to") or 0
@@ -672,8 +681,8 @@ def matches_user(vac, st, includes, excludes, muted):
         top = max(s_from, s_to)
         if not top:
             if not st.get("include_no_salary"):
-                return False
+                return "без зарплаты"
         elif top < min_salary:
-            return False
+            return "зарплата ниже порога"
 
-    return True
+    return None
