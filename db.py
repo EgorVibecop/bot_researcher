@@ -454,8 +454,14 @@ def known_uids(uids):
     return found
 
 
-def unsent_for_user(user_id, days=21, limit=500):
-    """Вакансии, которые этому человеку ещё не отправляли (свежие сверху)."""
+def unsent_for_user(user_id, days=21, limit=20000):
+    """Вакансии, которые этому человеку ещё не отправляли.
+
+    Отдаём сначала старые. Раньше тут стоял потолок в 500 строк и сортировка
+    «свежие сверху»: hh за один день выдаёт по широкому запросу больше
+    пятисот вакансий, они занимали весь лимит целиком, и всё, что старше
+    сегодняшнего дня, не попадало в очередь никогда.
+    """
     since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
     conn = get_conn()
     rows = conn.execute(
@@ -466,7 +472,7 @@ def unsent_for_user(user_id, days=21, limit=500):
         # вакансии не доезжали никогда - считаем их по дате находки.
         " WHERE s.uid IS NULL AND IFNULL(v.published_at, v.first_seen) >= ?"
         " AND IFNULL(v.closed, 0) = 0"
-        " ORDER BY IFNULL(v.published_at, v.first_seen) DESC LIMIT ?",
+        " ORDER BY IFNULL(v.published_at, v.first_seen) ASC LIMIT ?",
         (user_id, since, limit),
     ).fetchall()
     conn.close()

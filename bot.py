@@ -294,9 +294,10 @@ def pick_for_user(st, limit=None):
     # никогда не доедет до человека
     pending = db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS)
     picked = [v for v in pending if db.matches_user(v, st, includes, excludes, muted)]
-    picked.reverse()  # сначала то, что постарше - лента читается сверху вниз
+    # Очередь уже отсортирована от старых к свежим: лента читается сверху
+    # вниз, а при ограниченной порции первыми уходят те, что скоро закроются.
     if limit:
-        picked = picked[-limit:]
+        picked = picked[:limit]
     return picked
 
 
