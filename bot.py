@@ -73,6 +73,8 @@ MAIN_MENU = ReplyKeyboardMarkup(
 
 REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санкт-Петербург"}
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
+# Сколько вакансий уходит за одну отправку: переключается в настройках
+BATCH_STEPS = [8, 15, 25, 50]
 SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch",
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
@@ -174,7 +176,7 @@ def format_vacancy(vac):
 
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     rows.append([
-        InlineKeyboardButton("🚫 Скрыть компанию", callback_data="mute:" + vac["uid"])
+        InlineKeyboardButton("🚫 Скрыть вакансию", callback_data="hide:" + vac["uid"])
     ])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
@@ -319,7 +321,7 @@ async def deliver_all(app):
         st = db.get_settings(user["user_id"])
         if not may_send_now(st):
             continue
-        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 8))))
+        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 15))))
         if not picks:
             continue
         try:
@@ -371,7 +373,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Повторный /start раньше присылал только приветствие, и выглядело
         # это так, будто бот застыл. Отдаём то, что уже лежит в очереди.
         st = db.get_settings(user.id)
-        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 8))))
+        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 15))))
         if picks:
             sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
             db.mark_sent(user.id, sent)
@@ -404,7 +406,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if left:
             await update.message.reply_text(
                 "Это самое свежее. В запасе ещё " + str(left) + " подходящих — "
-                "буду присылать их порциями по " + str(int(st.get("max_per_run", 8))) +
+                "буду присылать их порциями по " + str(int(st.get("max_per_run", 15))) +
                 " штук каждые " + str(CHECK_INTERVAL_MINUTES) + " мин, "
                 "потом только новое.")
         else:
@@ -424,8 +426,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/search текст — разовый поиск по hh.ru (например: /search service design)\n"
         "/reset — снова показать вакансии, которые уже приходили\n"
         "/stats — статистика\n\n"
-        "Кнопка «🚫 Скрыть компанию» под вакансией убирает из ленты все вакансии "
-        "этого работодателя.",
+        "Кнопка «🚫 Скрыть вакансию» убирает карточку из ленты — больше она не придёт.",
         parse_mode=ParseMode.HTML, reply_markup=MAIN_MENU,
     )
 
@@ -434,7 +435,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.ensure_user(update.effective_user.id, update.effective_chat.id,
                    update.effective_user.username or "")
     st = db.get_settings(update.effective_user.id)
-    limit = int(st.get("max_per_run", 8))
+    limit = int(st.get("max_per_run", 15))
     # Сначала смотрим в очередь: опрос всех источников идёт пару минут, и
     # гонять его ради вакансий, которые уже лежат в базе, незачем.
     picks = await drop_closed(pick_for_user(st, limit=limit))
@@ -495,9 +496,24 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db.forget_sent(update.effective_user.id)
+    user_id = update.effective_user.id
+    db.forget_sent(user_id)
+    st = db.get_settings(user_id)
+    # Ждать следующей проверки незачем: показываем сразу большую порцию,
+    # остальное уйдёт обычным порядком.
+    picks = await drop_closed(pick_for_user(st, limit=FIRST_BATCH))
+    if not picks:
+        await update.message.reply_text(
+            "Историю очистил, но показывать пока нечего.", reply_markup=MAIN_MENU)
+        return
+    sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
+    db.mark_sent(user_id, sent)
+    left = len(pick_for_user(st))
     await update.message.reply_text(
-        "Историю отправок очистил — при следующей проверке пришлю всё подходящее заново.",
+        "Историю отправок очистил. " + (
+            "В запасе ещё " + str(left) + " — буду присылать порциями по " +
+            str(int(st.get("max_per_run", 15))) + " шт.; размер порции меняется "
+            "в настройках." if left else "Это всё, что подходит."),
         reply_markup=MAIN_MENU)
 
 
@@ -643,6 +659,9 @@ def settings_keyboard(st):
     rows.append([InlineKeyboardButton(
         "💰 от " + (money(st["min_salary"], "RUR") if st["min_salary"] else "любой"),
         callback_data="s:min_salary:next")])
+    rows.append([InlineKeyboardButton(
+        "📦 за раз: " + str(int(st.get("max_per_run", 15))) + " шт.",
+        callback_data="s:max_per_run:next")])
 
     cat_row = []
     for cid in matching.ALL_CATEGORY_IDS:
@@ -699,6 +718,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data or ""
     db.ensure_user(user_id, query.message.chat_id, query.from_user.username or "")
 
+    if data.startswith("hide:"):
+        # Прячем одну вакансию, а не всю компанию: у той же компании могут
+        # быть другие подходящие вакансии, и терять их незачем.
+        db.mark_sent(user_id, [data.split(":", 1)[1]])
+        await query.answer("Скрыл эту вакансию")
+        try:
+            await query.message.delete()
+        except Exception:
+            await query.edit_message_reply_markup(reply_markup=None)
+        return
+
     if data.startswith("mute:"):
         uid = data.split(":", 1)[1]
         vac = next((v for v in db.unsent_for_user(user_id, days=60) if v["uid"] == uid), None)
@@ -741,7 +771,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st = db.get_settings(user_id)
     if data.startswith("s:"):
         _, key, value = data.split(":", 2)
-        if key == "min_salary":
+        if key == "max_per_run":
+            cur = int(st.get("max_per_run", 15) or 15)
+            nxt = BATCH_STEPS[(BATCH_STEPS.index(cur) + 1) % len(BATCH_STEPS)]                 if cur in BATCH_STEPS else BATCH_STEPS[0]
+            db.set_setting(user_id, "max_per_run", nxt)
+        elif key == "min_salary":
             current = int(st["min_salary"] or 0)
             nxt = SALARY_STEPS[(SALARY_STEPS.index(current) + 1) % len(SALARY_STEPS)] \
                 if current in SALARY_STEPS else 0

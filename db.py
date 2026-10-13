@@ -47,7 +47,7 @@ SETTINGS_DEFAULTS = {
     "digest_hour": 10,
     "quiet_start": 23,
     "quiet_end": 8,
-    "max_per_run": 8,
+    "max_per_run": 15,
     "paused": 0,
 }
 
@@ -88,7 +88,7 @@ def init_db():
             digest_hour INTEGER DEFAULT 10,
             quiet_start INTEGER DEFAULT 23,
             quiet_end INTEGER DEFAULT 8,
-            max_per_run INTEGER DEFAULT 8,
+            max_per_run INTEGER DEFAULT 15,
             paused INTEGER DEFAULT 0
         );
 
@@ -174,7 +174,7 @@ def _migrate(conn):
         "digest_hour": "INTEGER DEFAULT 10",
         "quiet_start": "INTEGER DEFAULT 23",
         "quiet_end": "INTEGER DEFAULT 8",
-        "max_per_run": "INTEGER DEFAULT 8",
+        "max_per_run": "INTEGER DEFAULT 15",
         "paused": "INTEGER DEFAULT 0",
     }
     for name, decl in columns.items():
