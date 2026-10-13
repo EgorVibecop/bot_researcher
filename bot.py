@@ -332,7 +332,15 @@ async def deliver_all(app):
         st = db.get_settings(user["user_id"])
         if not may_send_now(st):
             continue
-        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 15))))
+        limit = int(st.get("max_per_run", 15))
+        queue = pick_for_user(st)
+        batch = queue[-limit:] if limit else queue
+        picks = await drop_closed(batch)
+        # Раньше в логе было только «отправлено N», и когда N оказывалось
+        # меньше порции, понять причину было нельзя: то ли очередь пуста,
+        # то ли вакансии сняли с публикации.
+        logger.info("пользователь %s: в очереди %s, к отправке %s, после проверки"
+                    " архива %s", user["user_id"], len(queue), len(batch), len(picks))
         if not picks:
             continue
         try:
