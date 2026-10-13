@@ -12,6 +12,7 @@
 чтобы положить базу на постоянный диск и не терять историю при передеплое.
 """
 
+import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -142,7 +143,12 @@ def init_db():
     )
     _migrate(conn)
     conn.commit()
+    counts = {name: conn.execute("SELECT COUNT(*) c FROM " + name).fetchone()["c"]
+              for name in ("users", "vacancies", "sent")}
     conn.close()
+    logging.getLogger(__name__).info(
+        "база %s: пользователей %s, вакансий %s, записей об отправках %s",
+        DB_PATH, counts["users"], counts["vacancies"], counts["sent"])
 
 
 def _migrate(conn):

@@ -310,6 +310,22 @@ async def drop_closed(vacancies):
     return alive
 
 
+MORE_KEYBOARD = InlineKeyboardMarkup([[
+    InlineKeyboardButton("➕ Ещё 10", callback_data="more:10"),
+    InlineKeyboardButton("➕ Ещё 50", callback_data="more:50"),
+]])
+
+
+async def send_more_button(bot, chat_id, left):
+    """Под пачкой показываем, сколько ещё ждёт, и даём добрать вручную."""
+    if not left:
+        return
+    await bot.send_message(
+        chat_id=chat_id,
+        text="В очереди ещё " + str(left) + " подходящих вакансий.",
+        reply_markup=MORE_KEYBOARD)
+
+
 async def send_vacancies(bot, chat_id, vacancies):
     sent_uids = []
     for vac in vacancies:
@@ -357,6 +373,8 @@ async def deliver_all(app):
             continue
         try:
             sent_uids = await send_vacancies(app.bot, user["chat_id"] or user["user_id"], picks)
+            await send_more_button(app.bot, user["chat_id"] or user["user_id"],
+                                   len(queue) - len(picks))
         except Forbidden:
             logger.info("пользователь %s заблокировал бота - ставлю на паузу", user["user_id"])
             db.set_setting(user["user_id"], "paused", 1)
@@ -478,11 +496,8 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if picks:
         sent_uids = await send_vacancies(context.bot, update.effective_chat.id, picks)
         db.mark_sent(update.effective_user.id, sent_uids)
-        left = len(pick_for_user(st))
-        if left:
-            await update.message.reply_text(
-                "В запасе ещё " + str(left) + " подходящих — жми ещё раз или "
-                "дождись очередной проверки.", reply_markup=MAIN_MENU)
+        await send_more_button(context.bot, update.effective_chat.id,
+                               len(pick_for_user(st)))
         return
 
     note = await update.message.reply_text(
@@ -776,6 +791,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data or ""
     db.ensure_user(user_id, query.message.chat_id, query.from_user.username or "")
+
+    if data.startswith("more:"):
+        # Отдаём следующие N из очереди - те, которых человек ещё не видел.
+        count = int(data.split(":", 1)[1])
+        st = db.get_settings(user_id)
+        picks = await drop_closed(pick_for_user(st, limit=count))
+        await query.answer("Собираю…" if picks else "Очередь пуста")
+        if not picks:
+            await query.edit_message_text("Очередь пуста — пришлю, как появится новое.")
+            return
+        sent = await send_vacancies(context.bot, query.message.chat_id, picks)
+        db.mark_sent(user_id, sent)
+        logger.info("кнопка «ещё»: пользователю %s отправлено %s", user_id, len(sent))
+        await send_more_button(context.bot, query.message.chat_id,
+                               len(pick_for_user(st)))
+        return
 
     if data.startswith("hide:"):
         # Прячем одну вакансию, а не всю компанию: у той же компании могут
