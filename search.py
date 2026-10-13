@@ -99,7 +99,12 @@ def _num(text):
 
 
 def _strip_tags(chunk):
-    text = re.sub(r"<[^>]+>", " ", chunk or "")
+    # Сначала выбрасываем скрипты и стили целиком: иначе в текст
+    # попадает JSON-разметка страницы, и цитата про удалёнку
+    # получается из обрывка вида '"addressLocality": "Москва"'.
+    text = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", " ", chunk or "",
+                  flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", html_mod.unescape(text)).strip()
 
 
@@ -336,6 +341,27 @@ REMOTE_WINDOW = 90      # столько символов вокруг совп�
 ENRICH_LIMIT = 25       # сколько вакансий за цикл догружаем ради описания
 
 
+# Мусор из разметки: если в куске текста есть кавычки с двоеточием или
+# фигурные скобки, это остаток JSON, а не фраза из описания.
+_JSON_JUNK = re.compile(r'["{}\[\]]')
+
+
+def _clean_quote(raw):
+    """Приводит кусок описания к читаемой фразе или возвращает None."""
+    quote = re.sub(r"\s+", " ", raw).strip()
+    if _JSON_JUNK.search(quote):
+        return None
+    # Обрезаем оборванные слова по краям, чтобы фраза начиналась
+    # и заканчивалась целым словом.
+    quote = re.sub(r"^\S*?\s", "", quote, count=1)
+    quote = re.sub(r"\s\S*$", "", quote, count=1)
+    # Повисший предлог в конце фразы читается как обрыв
+    quote = re.sub(r"\s(?:в|во|из|на|и|с|со|по|для|от|к|у|о|об|при|за)$",
+                   "", quote, flags=re.IGNORECASE)
+    quote = quote.strip(" ,;:-—·|")
+    return quote if len(quote) >= 15 else None
+
+
 def remote_mentioned(text):
     """Фраза, которой в описании обещают удалёнку, или None.
 
@@ -347,8 +373,9 @@ def remote_mentioned(text):
         around = plain[max(0, m.start() - REMOTE_WINDOW):m.end() + REMOTE_WINDOW]
         if REMOTE_DENIAL.search(around) or HYBRID_NEARBY.search(around):
             continue
-        quote = plain[max(0, m.start() - 40):m.end() + 60].strip()
-        return re.sub(r"\s+", " ", quote)
+        quote = _clean_quote(plain[max(0, m.start() - 40):m.end() + 60])
+        if quote:
+            return quote
     return None
 
 

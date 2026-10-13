@@ -88,6 +88,9 @@ WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office", "unknown"]
 # Список зависит от профиля: аналитику полный офис не нужен вовсе.
 SETTING_FORMATS = matching.SETTING_FORMATS
 
+# Сколько вакансий показываем в первой подборке после /start
+FIRST_BATCH = 20
+
 
 def format_names(value):
     formats = [f for f in (value or "").split(",") if f]
@@ -368,7 +371,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Собираю первую подборку, это займёт полминуты…")
         await collect()
         st = db.get_settings(user.id)
-        picks = await drop_closed(pick_for_user(st, limit=5))
+        # Первая подборка должна показать охват: пяти карточек мало,
+        # человек видит один источник и думает, что бот не работает.
+        picks = await drop_closed(pick_for_user(st, limit=FIRST_BATCH))
         if not picks:
             await update.message.reply_text(
                 "Сейчас свежих подходящих вакансий нет — пришлю, как появятся.")

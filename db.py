@@ -156,6 +156,11 @@ def _migrate(conn):
     if "it_accred" not in vac_have:
         conn.execute("ALTER TABLE vacancies ADD COLUMN it_accred TEXT")
 
+    # Цитаты, вырезанные из разметки страницы, нечитаемы: чистим один раз,
+    # при следующей проверке описания бот подставит нормальную фразу.
+    conn.execute("UPDATE vacancies SET remote_note = NULL, remote_checked = 0"
+                 " WHERE remote_note LIKE '%\"%' OR remote_note LIKE '%{%'")
+
     have = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     columns = {
         "work_formats": "TEXT DEFAULT 'remote'",
