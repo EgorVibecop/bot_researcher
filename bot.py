@@ -367,6 +367,21 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         WELCOME.format(interval=CHECK_INTERVAL_MINUTES),
         parse_mode=ParseMode.HTML, reply_markup=MAIN_MENU,
     )
+    if not is_new:
+        # Повторный /start раньше присылал только приветствие, и выглядело
+        # это так, будто бот застыл. Отдаём то, что уже лежит в очереди.
+        st = db.get_settings(user.id)
+        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 8))))
+        if picks:
+            sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
+            db.mark_sent(user.id, sent)
+        else:
+            await update.message.reply_text(
+                "Новых вакансий в очереди нет. Проверка источников идёт сама "
+                "каждые " + str(CHECK_INTERVAL_MINUTES) + " мин; «🔍 Найти сейчас» "
+                "запускает её вне очереди — это занимает пару минут.")
+        return
+
     if is_new:
         await update.message.reply_text("Собираю первую подборку, это займёт полминуты…")
         await collect()
@@ -418,10 +433,25 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.ensure_user(update.effective_user.id, update.effective_chat.id,
                    update.effective_user.username or "")
-    note = await update.message.reply_text("Проверяю источники…")
     st = db.get_settings(update.effective_user.id)
+    limit = int(st.get("max_per_run", 8))
+    # Сначала смотрим в очередь: опрос всех источников идёт пару минут, и
+    # гонять его ради вакансий, которые уже лежат в базе, незачем.
+    picks = await drop_closed(pick_for_user(st, limit=limit))
+    if picks:
+        sent_uids = await send_vacancies(context.bot, update.effective_chat.id, picks)
+        db.mark_sent(update.effective_user.id, sent_uids)
+        left = len(pick_for_user(st))
+        if left:
+            await update.message.reply_text(
+                "В запасе ещё " + str(left) + " подходящих — жми ещё раз или "
+                "дождись очередной проверки.", reply_markup=MAIN_MENU)
+        return
+
+    note = await update.message.reply_text(
+        "Очередь пуста, обхожу источники — это занимает пару минут…")
     await collect(set(db.active_sources(st)))
-    picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 8))))
+    picks = await drop_closed(pick_for_user(st, limit=limit))
     await note.delete()
     if not picks:
         await update.message.reply_text(
