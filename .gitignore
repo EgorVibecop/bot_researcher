@@ -12,3 +12,4 @@ bot_log.txt
 _t*.py
 _smoke.py
 _check.py
+_*.py
