@@ -9,3 +9,6 @@ bot_log.txt
 # Сейчас не создаётся (каналы читаются без аккаунта), оставлено на всякий случай.
 *.session
 *.session-journal
+_t*.py
+_smoke.py
+_check.py
