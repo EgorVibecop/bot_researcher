@@ -325,6 +325,8 @@ TITLE = "Радар вакансий для исследователей"
 DEFAULT_WORK_FORMATS = "remote"
 SETTING_FORMATS = ["remote", "hybrid", "office"]
 TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters"]
+# Маркер IT-аккредитации нужен только аналитику.
+SHOW_IT_ACCRED = False
 EMPLOYER_QUERY = (
     "исследователь OR исследователи OR исследованиям OR исследований OR "
     "researcher OR research OR ресерчер OR ресёрч OR ресерч OR "
@@ -362,3 +364,4 @@ if PROFILE == "analyst":
     SETTING_FORMATS = _p.SETTING_FORMATS
     WELCOME_BODY = _p.WELCOME_BODY
     EMPLOYER_QUERY = _p.EMPLOYER_QUERY
+    SHOW_IT_ACCRED = True

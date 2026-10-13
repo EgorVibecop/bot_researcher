@@ -144,9 +144,11 @@ def format_vacancy(vac):
     if note and "remote_maybe" in (vac.get("work_format") or ""):
         lines.append("<i>«" + escape(note[:110]) + "»</i>")
     # IT-аккредитация: читаем из описания, молчание — это «нет информации».
-    accred = (vac.get("it_accred") or "").strip()
-    lines.append("🏛 IT-аккредитация: " + {"yes": "да", "no": "нет"}.get(
-        accred, "нет информации"))
+    # Исследователю этот маркер не нужен, поэтому он привязан к профилю.
+    if matching.SHOW_IT_ACCRED:
+        accred = (vac.get("it_accred") or "").strip()
+        lines.append("🏛 IT-аккредитация: " + {"yes": "да", "no": "нет"}.get(
+            accred, "нет информации"))
     # Зарплату пишем всегда: её отсутствие — тоже информация о вакансии.
     lines.append("💰 " + (salary_line(vac) or "не указана"))
 
