@@ -186,6 +186,11 @@ def format_vacancy(vac):
 
 # ------------------------------------------------------------------ сбор
 
+# Чем закончился последний обход источников: показываем в /stats,
+# иначе на вопрос «почему тихо» ответить нечем.
+LAST_CYCLE = {}
+
+
 async def collect(sources=None):
     """Опрашивает источники, размечает категории, кладёт в базу."""
     sources = sources or set(db.DEFAULT_SOURCES.split(","))
@@ -245,6 +250,9 @@ async def collect(sources=None):
     logger.info("собрано %s вакансий, новых %s | по источникам (всего/по теме): %s%s",
                 len(items), len(fresh), breakdown,
                 " | молчат: " + ", ".join(silent) if silent else "")
+    LAST_CYCLE.update(at=db.now().strftime("%H:%M"), collected=len(items),
+                      fresh=len(fresh),
+                      relevant=sum(1 for v in items if v.get("relevant")))
     return items, fresh
 
 
@@ -637,7 +645,12 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Отправлено всего: " + str(s["sent_total"]) + "\n"
         "Подходящих вакансий в базе: " + str(s["in_base"]) + "\n"
         "Появилось за сутки: " + str(s["fresh_day"]) + "\n"
-        "По источникам: " + by_source + "\n\n"
+        "В очереди именно вам: <b>" + str(len(pick_for_user(st))) + "</b>\n"
+        + ("Последняя проверка: " + LAST_CYCLE["at"] + ", собрано " +
+           str(LAST_CYCLE["collected"]) + ", из них новых " +
+           str(LAST_CYCLE["fresh"]) + "\n" if LAST_CYCLE else
+           "Последняя проверка: ещё не было\n")
+        + "По источникам: " + by_source + "\n\n"
         "Режим: " + ("дайджест в " + str(st["digest_hour"]) + ":00"
                      if st["mode"] == "digest" else "присылать сразу") + "\n"
         "Статус: " + ("на паузе ⏸" if st["paused"] else "работает ▶️"),
