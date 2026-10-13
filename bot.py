@@ -29,7 +29,7 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import Forbidden, NetworkError, TelegramError, TimedOut
+from telegram.error import Forbidden, NetworkError, RetryAfter, TelegramError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -76,7 +76,8 @@ MAIN_MENU = ReplyKeyboardMarkup(
 REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санкт-Петербург"}
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
 # Сколько вакансий уходит за одну отправку: переключается в настройках
-BATCH_STEPS = [8, 15, 25, 50]
+# 0 - отдавать всё, что подходит, без ограничения порции
+BATCH_STEPS = [0, 15, 25, 50]
 SOURCE_NAMES = {"hh": "hh.ru", "zarplata": "Зарплата.ру", "rabota": "Работа.ру", "habr": "Хабр Карьера", "getmatch": "getmatch",
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
@@ -94,7 +95,7 @@ WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office", "unknown"]
 SETTING_FORMATS = matching.SETTING_FORMATS
 
 # Сколько вакансий показываем в первой подборке после /start
-FIRST_BATCH = 20
+FIRST_BATCH = 0
 
 
 def format_names(value):
@@ -322,6 +323,17 @@ async def send_vacancies(bot, chat_id, vacancies):
             await asyncio.sleep(0.4)
         except Forbidden:
             raise
+        except RetryAfter as exc:
+            # На большой пачке телеграм просит паузу. Ждём и шлём ещё раз,
+            # иначе вакансия потеряется молча.
+            await asyncio.sleep(float(getattr(exc, "retry_after", 5)) + 1)
+            try:
+                await bot.send_message(
+                    chat_id=chat_id, text=text, reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+                sent_uids.append(vac["uid"])
+            except TelegramError as again:
+                logger.warning("не отправилось после паузы (%s): %s", vac["uid"], again)
         except TelegramError as exc:
             logger.warning("не отправилось (%s): %s", vac["uid"], exc)
     return sent_uids
@@ -332,7 +344,7 @@ async def deliver_all(app):
         st = db.get_settings(user["user_id"])
         if not may_send_now(st):
             continue
-        limit = int(st.get("max_per_run", 15))
+        limit = int(st["max_per_run"] or 0)
         queue = pick_for_user(st)
         batch = queue[-limit:] if limit else queue
         picks = await drop_closed(batch)
@@ -398,7 +410,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Повторный /start раньше присылал только приветствие, и выглядело
         # это так, будто бот застыл. Отдаём то, что уже лежит в очереди.
         st = db.get_settings(user.id)
-        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 15))))
+        picks = await drop_closed(pick_for_user(st, limit=int(st["max_per_run"])))
         if picks:
             sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
             db.mark_sent(user.id, sent)
@@ -431,9 +443,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if left:
             await update.message.reply_text(
                 "Это самое свежее. В запасе ещё " + str(left) + " подходящих — "
-                "буду присылать их порциями по " + str(int(st.get("max_per_run", 15))) +
-                " штук каждые " + str(CHECK_INTERVAL_MINUTES) + " мин, "
-                "потом только новое.")
+                "пришлю их в ближайшие " + str(CHECK_INTERVAL_MINUTES) +
+                " мин, потом только новое.")
         else:
             await update.message.reply_text("Дальше буду присылать только новое.")
 
@@ -460,7 +471,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.ensure_user(update.effective_user.id, update.effective_chat.id,
                    update.effective_user.username or "")
     st = db.get_settings(update.effective_user.id)
-    limit = int(st.get("max_per_run", 15))
+    limit = int(st["max_per_run"] or 0)
     # Сначала смотрим в очередь: опрос всех источников идёт пару минут, и
     # гонять его ради вакансий, которые уже лежат в базе, незачем.
     picks = await drop_closed(pick_for_user(st, limit=limit))
@@ -536,9 +547,8 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     left = len(pick_for_user(st))
     await update.message.reply_text(
         "Историю отправок очистил. " + (
-            "В запасе ещё " + str(left) + " — буду присылать порциями по " +
-            str(int(st.get("max_per_run", 15))) + " шт.; размер порции меняется "
-            "в настройках." if left else "Это всё, что подходит."),
+            "В запасе ещё " + str(left) + " подходящих — пришлю следующей "
+            "проверкой." if left else "Это всё, что подходит."),
         reply_markup=MAIN_MENU)
 
 
@@ -708,7 +718,8 @@ def settings_keyboard(st):
         "💰 от " + (money(st["min_salary"], "RUR") if st["min_salary"] else "любой"),
         callback_data="s:min_salary:next")])
     rows.append([InlineKeyboardButton(
-        "📦 за раз: " + str(int(st.get("max_per_run", 15))) + " шт.",
+        "📦 за раз: " + (str(int(st["max_per_run"])) + " шт."
+                        if st["max_per_run"] else "все"),
         callback_data="s:max_per_run:next")])
 
     cat_row = []
@@ -820,7 +831,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("s:"):
         _, key, value = data.split(":", 2)
         if key == "max_per_run":
-            cur = int(st.get("max_per_run", 15) or 15)
+            cur = int(st.get("max_per_run", 0) or 0)
             nxt = BATCH_STEPS[(BATCH_STEPS.index(cur) + 1) % len(BATCH_STEPS)]                 if cur in BATCH_STEPS else BATCH_STEPS[0]
             db.set_setting(user_id, "max_per_run", nxt)
         elif key == "min_salary":

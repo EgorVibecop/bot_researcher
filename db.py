@@ -48,7 +48,7 @@ SETTINGS_DEFAULTS = {
     "digest_hour": 10,
     "quiet_start": 23,
     "quiet_end": 8,
-    "max_per_run": 15,
+    "max_per_run": 0,
     "paused": 0,
 }
 
@@ -89,7 +89,7 @@ def init_db():
             digest_hour INTEGER DEFAULT 10,
             quiet_start INTEGER DEFAULT 23,
             quiet_end INTEGER DEFAULT 8,
-            max_per_run INTEGER DEFAULT 15,
+            max_per_run INTEGER DEFAULT 0,
             paused INTEGER DEFAULT 0
         );
 
@@ -157,6 +157,11 @@ def _migrate(conn):
     if "it_accred" not in vac_have:
         conn.execute("ALTER TABLE vacancies ADD COLUMN it_accred TEXT")
 
+    # Раньше за отправку уходила порция в 8-15 вакансий, и лента выглядела
+    # скупой при полной очереди. Переводим тех, кто размер не менял, на
+    # «все»: 0 значит отдавать всё подходящее сразу.
+    conn.execute("UPDATE users SET max_per_run = 0 WHERE max_per_run IN (8, 15)")
+
     # Цитаты, вырезанные из разметки страницы, нечитаемы: чистим один раз,
     # при следующей проверке описания бот подставит нормальную фразу.
     conn.execute("UPDATE vacancies SET remote_note = NULL, remote_checked = 0"
@@ -175,7 +180,7 @@ def _migrate(conn):
         "digest_hour": "INTEGER DEFAULT 10",
         "quiet_start": "INTEGER DEFAULT 23",
         "quiet_end": "INTEGER DEFAULT 8",
-        "max_per_run": "INTEGER DEFAULT 15",
+        "max_per_run": "INTEGER DEFAULT 0",
         "paused": "INTEGER DEFAULT 0",
     }
     for name, decl in columns.items():
