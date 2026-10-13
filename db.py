@@ -49,7 +49,7 @@ SETTINGS_DEFAULTS = {
     "digest_hour": 10,
     "quiet_start": 23,
     "quiet_end": 8,
-    "max_per_run": 0,
+    "max_per_run": 5,
     "paused": 0,
 }
 
@@ -90,7 +90,7 @@ def init_db():
             digest_hour INTEGER DEFAULT 10,
             quiet_start INTEGER DEFAULT 23,
             quiet_end INTEGER DEFAULT 8,
-            max_per_run INTEGER DEFAULT 0,
+            max_per_run INTEGER DEFAULT 5,
             paused INTEGER DEFAULT 0
         );
 
@@ -166,7 +166,9 @@ def _migrate(conn):
     # Раньше за отправку уходила порция в 8-15 вакансий, и лента выглядела
     # скупой при полной очереди. Переводим тех, кто размер не менял, на
     # «все»: 0 значит отдавать всё подходящее сразу.
-    conn.execute("UPDATE users SET max_per_run = 0 WHERE max_per_run IN (8, 15)")
+    # Темп ленты: по пять вакансий в час. «Все разом» было временной мерой,
+    # пока разбирались, почему приходит мало.
+    conn.execute("UPDATE users SET max_per_run = 5 WHERE max_per_run IN (0, 8, 15)")
 
     # Фильтры по зарплате, региону и категориям убраны из настроек: они
     # молча резали ленту (порог в 300 тысяч отсекал почти всё). Сбрасываем
@@ -192,7 +194,7 @@ def _migrate(conn):
         "digest_hour": "INTEGER DEFAULT 10",
         "quiet_start": "INTEGER DEFAULT 23",
         "quiet_end": "INTEGER DEFAULT 8",
-        "max_per_run": "INTEGER DEFAULT 0",
+        "max_per_run": "INTEGER DEFAULT 5",
         "paused": "INTEGER DEFAULT 0",
     }
     for name, decl in columns.items():

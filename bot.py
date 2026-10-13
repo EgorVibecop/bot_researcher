@@ -47,7 +47,7 @@ import search
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
-CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "30"))
+CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "60"))
 # Окно поиска специально задано в коде, а не переменной окружения: в панели
 # хостинга когда-то осталось значение 7, оно перебивало код, и всё, что висит
 # дольше недели, для бота не существовало - так терялись живые вакансии,
@@ -78,7 +78,7 @@ REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санк
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
 # Сколько вакансий уходит за одну отправку: переключается в настройках
 # 0 - отдавать всё, что подходит, без ограничения порции
-BATCH_STEPS = [0, 15, 25, 50]
+BATCH_STEPS = [5, 10, 25, 0]
 SOURCE_NAMES = {"hh": "hh.ru", "zarplata": "Зарплата.ру", "rabota": "Работа.ру", "habr": "Хабр Карьера", "getmatch": "getmatch",
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
@@ -96,7 +96,9 @@ WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office", "unknown"]
 SETTING_FORMATS = matching.SETTING_FORMATS
 
 # Сколько вакансий показываем в первой подборке после /start
-FIRST_BATCH = 0
+# Первая подборка чуть больше обычной порции: человек должен увидеть,
+# что бот работает, но не получить сотню карточек разом.
+FIRST_BATCH = 10
 
 
 def format_names(value):
@@ -335,8 +337,8 @@ async def drop_closed(vacancies):
 
 
 MORE_KEYBOARD = InlineKeyboardMarkup([[
+    InlineKeyboardButton("➕ Ещё 5", callback_data="more:5"),
     InlineKeyboardButton("➕ Ещё 10", callback_data="more:10"),
-    InlineKeyboardButton("➕ Ещё 50", callback_data="more:50"),
 ]])
 
 
