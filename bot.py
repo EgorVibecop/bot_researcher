@@ -228,9 +228,9 @@ async def collect(sources=None):
     # Догоняем накопленное: у вакансий, собранных до того, как бот научился
     # читать формат со страницы, он так и остался пустым. Разбираем их
     # небольшими порциями, пока очередь не кончится.
-    stale = db.unchecked_remote(limit=15)
+    stale = db.unchecked_remote(limit=40)
     if stale:
-        await search.enrich_remote(stale, limit=15)
+        await search.enrich_remote(stale, limit=40)
         db.save_formats(stale)
     # Разбивка по источникам прямо в логе: по ней сразу видно, какой сайт
     # реально отвечает, а какой молчит из-за блокировок или смены вёрстки.
