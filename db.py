@@ -497,6 +497,17 @@ def forget_sent(user_id):
     conn.close()
 
 
+def forget_sent_all():
+    """Сбрасывает историю отправок у всех. Нужно после правки фильтра,
+    чтобы люди увидели то, что бот раньше молча отсеивал."""
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM sent")
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
+
+
 def cleanup(days=45):
     """Убирает старые вакансии и хвосты отправок."""
     edge = (now() - timedelta(days=days)).isoformat(timespec="seconds")

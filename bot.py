@@ -21,6 +21,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -339,6 +340,7 @@ async def deliver_all(app):
 async def poll_loop(app):
     await asyncio.sleep(10)
     while True:
+        started = time.monotonic()
         try:
             sources = set()
             for user in db.active_users():
@@ -349,7 +351,12 @@ async def poll_loop(app):
             db.cleanup()
         except Exception:
             logger.exception("цикл опроса упал, продолжаю через интервал")
-        await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
+        # Сам обход источников идёт минутами, и раньше он прибавлялся к паузе:
+        # «каждые 30 минут» на деле превращалось в 40 и больше. Спим столько,
+        # сколько осталось до конца интервала.
+        spent = time.monotonic() - started
+        logger.info("цикл занял %.1f мин", spent / 60)
+        await asyncio.sleep(max(60, CHECK_INTERVAL_MINUTES * 60 - spent))
 
 
 # -------------------------------------------------------------- обработчики
@@ -517,6 +524,24 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
             str(int(st.get("max_per_run", 15))) + " шт.; размер порции меняется "
             "в настройках." if left else "Это всё, что подходит."),
         reply_markup=MAIN_MENU)
+
+
+async def cmd_resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/resetall — сбросить историю отправок всем сразу (только админ)."""
+    if not ADMIN_ID or str(update.effective_user.id) != str(ADMIN_ID):
+        await update.message.reply_text(
+            "Команда только для админа: она затрагивает всех пользователей.\n\n"
+            "Твой Telegram id: <code>" + str(update.effective_user.id) + "</code>",
+            parse_mode=ParseMode.HTML)
+        return
+    rows = db.forget_sent_all()
+    users = len(db.active_users())
+    await update.message.reply_text(
+        "Сбросил историю отправок: " + str(rows) + " записей, "
+        "активных пользователей " + str(users) + ".\n"
+        "Все подходящие вакансии за последние " + str(SEARCH_PERIOD_DAYS) +
+        " дней пойдут заново, порциями.", reply_markup=MAIN_MENU)
+    logger.info("админ сбросил историю отправок всем: %s записей", rows)
 
 
 async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -926,6 +951,7 @@ def main():
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("reset", cmd_reset))
+    app.add_handler(CommandHandler("resetall", cmd_resetall))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
