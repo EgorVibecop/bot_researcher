@@ -383,7 +383,7 @@ def close_missing(source, alive_uids):
     return closed
 
 
-def unchecked_remote(limit=15, days=30):
+def unchecked_remote(limit=15, days=21):
     """Подходящие вакансии без удалёнки, у которых мы ещё не читали описание.
 
     Нужно для накопленного: обогащение формата идёт только по свежим
@@ -437,7 +437,7 @@ def known_uids(uids):
     return found
 
 
-def unsent_for_user(user_id, days=30, limit=500):
+def unsent_for_user(user_id, days=21, limit=500):
     """Вакансии, которые этому человеку ещё не отправляли (свежие сверху)."""
     since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
     conn = get_conn()

@@ -362,7 +362,11 @@ CLOSED_MARKERS = re.compile(
     r"вакансия\s+в\s+архиве|вакансия\s+закрыта|вакансия\s+удалена"
     r"|больше\s+не\s+актуальн|закрыт\w+\s+ваканс'?и"
     r"|no\s+longer\s+accepting\s+applications|this\s+job\s+is\s+no\s+longer"
-    r"|вакансия\s+не\s+найдена|offer\s+is\s+not\s+active",
+    r"|вакансия\s+не\s+найдена|offer\s+is\s+not\s+active"
+    r"|вакансия\s+(?:уже\s+)?(?:неактуальн|снята)"
+    r"|публикация\s+вакансии\s+(?:завершена|остановлена)"
+    r"|этой\s+вакансии\s+(?:больше\s+)?нет"
+    r"|position\s+(?:has\s+been\s+)?(?:closed|filled)",
     re.IGNORECASE)
 
 
