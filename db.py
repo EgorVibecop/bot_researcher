@@ -593,6 +593,36 @@ def get_muted(user_id):
 
 # ----------------------------------------------------------------- статистика
 
+def funnel(user_id, days):
+    """Сколько вакансий отсекается на каждом шаге - от базы до очереди.
+
+    Нужна, чтобы на «почему приходит не всё» отвечать цифрами: по каждому
+    шагу видно, сколько вакансий он съел.
+    """
+    since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
+    conn = get_conn()
+    one = lambda sql, args=(): conn.execute(sql, args).fetchone()["c"]
+    out = {
+        "всего в базе": one("SELECT COUNT(*) c FROM vacancies"),
+        "по теме": one("SELECT COUNT(*) c FROM vacancies WHERE relevant = 1"),
+        "свежее окна": one(
+            "SELECT COUNT(*) c FROM vacancies WHERE relevant = 1"
+            " AND IFNULL(published_at, first_seen) >= ?", (since,)),
+        "не сняты с публикации": one(
+            "SELECT COUNT(*) c FROM vacancies WHERE relevant = 1"
+            " AND IFNULL(published_at, first_seen) >= ? AND IFNULL(closed, 0) = 0",
+            (since,)),
+        "ещё не отправляли вам": one(
+            "SELECT COUNT(*) c FROM vacancies v"
+            " LEFT JOIN sent s ON s.uid = v.uid AND s.user_id = ?"
+            " WHERE s.uid IS NULL AND v.relevant = 1"
+            " AND IFNULL(v.published_at, v.first_seen) >= ?"
+            " AND IFNULL(v.closed, 0) = 0", (user_id, since)),
+    }
+    conn.close()
+    return out
+
+
 def user_stats(user_id):
     conn = get_conn()
     week = (now() - timedelta(days=7)).isoformat(timespec="seconds")

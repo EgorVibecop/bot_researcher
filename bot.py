@@ -612,6 +612,26 @@ async def cmd_resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("админ сбросил историю отправок всем: %s записей", rows)
 
 
+async def cmd_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/why — куда делись вакансии: по шагам, с цифрами."""
+    user_id = update.effective_user.id
+    st = db.get_settings(user_id)
+    steps = db.funnel(user_id, SEARCH_PERIOD_DAYS)
+    lines = ["🔍 <b>Куда деваются вакансии</b>", ""]
+    for name, count in steps.items():
+        lines.append(name + ": <b>" + str(count) + "</b>")
+    lines.append("")
+    lines.append("после ваших настроек: <b>" + str(len(pick_for_user(st))) + "</b>")
+    lines.append("отсеяно настройками: " + queue_reasons(st))
+    lines.append("")
+    lines.append("формат: " + (format_names(st["work_formats"]) or "любой") +
+                 " · за раз: " + (str(int(st["max_per_run"])) if st["max_per_run"]
+                                  else "все") +
+                 " · окно: " + str(SEARCH_PERIOD_DAYS) + " дн.")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
+                                    reply_markup=MAIN_MENU)
+
+
 async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает Telegram id — по нему настраивается ADMIN_ID."""
     user = update.effective_user
@@ -1021,6 +1041,7 @@ def main():
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("resetall", cmd_resetall))
+    app.add_handler(CommandHandler("why", cmd_why))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
