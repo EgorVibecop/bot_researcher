@@ -122,6 +122,9 @@ def _hh_item(raw):
     fmt = ",".join(dict.fromkeys(formats))
     links = raw.get("links") or {}
     vid = str(raw.get("vacancyId"))
+    # hh сам отмечает аккредитованных работодателей - это официальный
+    # реестр Минцифры, точнее любых слов в описании.
+    accredited = (raw.get("company") or {}).get("accreditedITEmployer")
     return {
         "uid": "hh:" + vid,
         "source": "hh",
@@ -137,6 +140,7 @@ def _hh_item(raw):
         "currency": comp.get("currencyCode") or "",
         "work_format": fmt,
         "experience": HH_EXPERIENCE.get(raw.get("workExperience"), ""),
+        "it_accred": "yes" if accredited else ("no" if accredited is False else ""),
     }
 
 
@@ -547,7 +551,9 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
                             vac["uid"], type(exc).__name__, exc)
                 continue
             vac["remote_checked"] = True
-            if description:
+            # hh сам отмечает аккредитованных работодателей - его ответ
+            # точнее слов в описании, поэтому не затираем.
+            if description and not vac.get("it_accred"):
                 vac["it_accred"] = it_accredited(description) or ""
                 if vac["it_accred"] == "yes":
                     accred += 1

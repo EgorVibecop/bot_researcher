@@ -296,11 +296,32 @@ def pick_for_user(st, limit=None):
     # никогда не доедет до человека
     pending = db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS)
     picked = [v for v in pending if db.matches_user(v, st, includes, excludes, muted)]
-    # Очередь уже отсортирована от старых к свежим: лента читается сверху
-    # вниз, а при ограниченной порции первыми уходят те, что скоро закроются.
+    # Очередь отсортирована от свежих к старым.
     if limit:
         picked = picked[:limit]
     return picked
+
+
+async def pick_alive(st, limit):
+    """Набирает ровно limit живых вакансий, добирая взамен снятых.
+
+    Раньше бот брал порцию, выкидывал из неё архив и отправлял остаток:
+    на старых вакансиях из пяти доезжало полторы. Теперь недостающие
+    добираются из той же очереди.
+    """
+    includes, excludes, muted = user_filters(st["user_id"])
+    pending = [v for v in db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS)
+               if db.matches_user(v, st, includes, excludes, muted)]
+    if not limit:
+        return await drop_closed(pending)
+
+    alive, start = [], 0
+    # Потолок попыток, чтобы на мёртвой пачке не ходить по всей очереди.
+    while len(alive) < limit and start < len(pending) and start < limit * 6:
+        chunk = pending[start:start + limit]
+        alive += await drop_closed(chunk)
+        start += len(chunk)
+    return alive[:limit]
 
 
 def may_send_now(st):
@@ -392,13 +413,9 @@ async def deliver_all(app):
             continue
         limit = int(st["max_per_run"] or 0)
         queue = pick_for_user(st)
-        batch = queue[-limit:] if limit else queue
-        picks = await drop_closed(batch)
-        # Раньше в логе было только «отправлено N», и когда N оказывалось
-        # меньше порции, понять причину было нельзя: то ли очередь пуста,
-        # то ли вакансии сняли с публикации.
-        logger.info("пользователь %s: в очереди %s, к отправке %s, после проверки"
-                    " архива %s", user["user_id"], len(queue), len(batch), len(picks))
+        picks = await pick_alive(st, limit)
+        logger.info("пользователь %s: в очереди %s, порция %s, живых к отправке %s",
+                    user["user_id"], len(queue), limit or "все", len(picks))
         if not picks:
             continue
         try:
@@ -458,7 +475,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Повторный /start раньше присылал только приветствие, и выглядело
         # это так, будто бот застыл. Отдаём то, что уже лежит в очереди.
         st = db.get_settings(user.id)
-        picks = await drop_closed(pick_for_user(st, limit=int(st["max_per_run"])))
+        picks = await pick_alive(st, int(st["max_per_run"]))
         if picks:
             sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
             db.mark_sent(user.id, sent)
@@ -475,7 +492,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         st = db.get_settings(user.id)
         # Первая подборка должна показать охват: пяти карточек мало,
         # человек видит один источник и думает, что бот не работает.
-        picks = await drop_closed(pick_for_user(st, limit=FIRST_BATCH))
+        picks = await pick_alive(st, FIRST_BATCH)
         if not picks:
             await update.message.reply_text(
                 "Сейчас свежих подходящих вакансий нет — пришлю, как появятся.")
@@ -522,7 +539,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     limit = int(st["max_per_run"] or 0)
     # Сначала смотрим в очередь: опрос всех источников идёт пару минут, и
     # гонять его ради вакансий, которые уже лежат в базе, незачем.
-    picks = await drop_closed(pick_for_user(st, limit=limit))
+    picks = await pick_alive(st, limit)
     if picks:
         sent_uids = await send_vacancies(context.bot, update.effective_chat.id, picks)
         db.mark_sent(update.effective_user.id, sent_uids)
@@ -533,7 +550,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = await update.message.reply_text(
         "Очередь пуста, обхожу источники — это занимает пару минут…")
     await collect(set(db.active_sources(st)))
-    picks = await drop_closed(pick_for_user(st, limit=limit))
+    picks = await pick_alive(st, limit)
     await note.delete()
     if not picks:
         await update.message.reply_text(
@@ -582,7 +599,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st = db.get_settings(user_id)
     # Ждать следующей проверки незачем: показываем сразу большую порцию,
     # остальное уйдёт обычным порядком.
-    picks = await drop_closed(pick_for_user(st, limit=FIRST_BATCH))
+    picks = await pick_alive(st, FIRST_BATCH)
     if not picks:
         await update.message.reply_text(
             "Историю очистил, но показывать пока нечего.", reply_markup=MAIN_MENU)
@@ -825,7 +842,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отдаём следующие N из очереди - те, которых человек ещё не видел.
         count = int(data.split(":", 1)[1])
         st = db.get_settings(user_id)
-        picks = await drop_closed(pick_for_user(st, limit=count))
+        picks = await pick_alive(st, count)
         await query.answer("Собираю…" if picks else "Очередь пуста")
         if not picks:
             await query.edit_message_text("Очередь пуста — пришлю, как появится новое.")

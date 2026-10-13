@@ -412,7 +412,7 @@ def unchecked_remote(limit=15, days=21):
     since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
     conn = get_conn()
     rows = conn.execute(
-        "SELECT uid, source, ext_id, url, work_format FROM vacancies"
+        "SELECT uid, source, ext_id, url, work_format, it_accred FROM vacancies"
         " WHERE relevant = 1 AND IFNULL(remote_checked, 0) = 0"
         " AND published_at >= ?"
         # Сначала те, у кого формат вообще не указан - это LinkedIn и другие
@@ -432,7 +432,7 @@ def save_formats(items):
     conn = get_conn()
     conn.executemany(
         "UPDATE vacancies SET work_format = ?, remote_checked = 1, remote_note = ?,"
-        " it_accred = ? WHERE uid = ?",
+        " it_accred = COALESCE(NULLIF(?, ''), it_accred) WHERE uid = ?",
         [(v.get("work_format") or "", v.get("remote_note"), v.get("it_accred"),
           v["uid"]) for v in items])
     conn.commit()
@@ -459,10 +459,9 @@ def known_uids(uids):
 def unsent_for_user(user_id, days=21, limit=20000):
     """Вакансии, которые этому человеку ещё не отправляли.
 
-    Отдаём сначала старые. Раньше тут стоял потолок в 500 строк и сортировка
-    «свежие сверху»: hh за один день выдаёт по широкому запросу больше
-    пятисот вакансий, они занимали весь лимит целиком, и всё, что старше
-    сегодняшнего дня, не попадало в очередь никогда.
+    Сначала свежие. Потолок тут держим высоким: hh за один день выдаёт по
+    широкому запросу больше пятисот вакансий, и при маленьком лимите всё,
+    что старше сегодняшнего дня, не попадало в очередь никогда.
     """
     since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
     conn = get_conn()
@@ -474,7 +473,7 @@ def unsent_for_user(user_id, days=21, limit=20000):
         # вакансии не доезжали никогда - считаем их по дате находки.
         " WHERE s.uid IS NULL AND IFNULL(v.published_at, v.first_seen) >= ?"
         " AND IFNULL(v.closed, 0) = 0"
-        " ORDER BY IFNULL(v.published_at, v.first_seen) ASC LIMIT ?",
+        " ORDER BY IFNULL(v.published_at, v.first_seen) DESC LIMIT ?",
         (user_id, since, limit),
     ).fetchall()
     conn.close()
