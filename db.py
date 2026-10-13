@@ -444,8 +444,12 @@ def unsent_for_user(user_id, days=21, limit=500):
     rows = conn.execute(
         "SELECT v.* FROM vacancies v"
         " LEFT JOIN sent s ON s.uid = v.uid AND s.user_id = ?"
-        " WHERE s.uid IS NULL AND v.published_at >= ? AND IFNULL(v.closed, 0) = 0"
-        " ORDER BY v.published_at DESC LIMIT ?",
+        # У части источников даты публикации нет вовсе (IT-One, карьерные
+        # сайты, телеграм). Раньше сравнение с NULL было ложным, и такие
+        # вакансии не доезжали никогда - считаем их по дате находки.
+        " WHERE s.uid IS NULL AND IFNULL(v.published_at, v.first_seen) >= ?"
+        " AND IFNULL(v.closed, 0) = 0"
+        " ORDER BY IFNULL(v.published_at, v.first_seen) DESC LIMIT ?",
         (user_id, since, limit),
     ).fetchall()
     conn.close()
@@ -626,7 +630,10 @@ def matches_user(vac, st, includes, excludes, muted):
     # удалёнку) засчитывается тому, кто просил удалёнку
     if "remote" in wanted_formats:
         wanted_formats.add("remote_maybe")
-    if "office" in wanted_formats:
+    # «Формат не указан» засчитываем тому, кто готов на офис. А если офиса
+    # в профиле нет вовсе (у аналитика), засчитываем всем: иначе весь
+    # LinkedIn, карьерные сайты и телеграм молча пропадают из ленты.
+    if "office" in wanted_formats or "office" not in matching.SETTING_FORMATS:
         wanted_formats.add("unknown")
     if wanted_formats and not formats & wanted_formats:
         return False
