@@ -137,6 +137,11 @@ def format_vacancy(vac):
     lines = [head]
     if second:
         lines.append(" · ".join(second))
+    # Если удалёнку бот вычитал из текста, показываем саму фразу: обещание
+    # «по договорённости» должно быть проверяемым, а не на веру.
+    note = (vac.get("remote_note") or "").strip()
+    if note and "remote_maybe" in (vac.get("work_format") or ""):
+        lines.append("<i>«" + escape(note[:110]) + "»</i>")
     # Зарплату пишем всегда: её отсутствие — тоже информация о вакансии.
     lines.append("💰 " + (salary_line(vac) or "не указана"))
 
@@ -189,6 +194,21 @@ async def collect(sources=None):
         [v for v in items if v.get("relevant") and v["uid"] not in known])
 
     fresh = db.upsert_vacancies(items)
+
+    # Прогоняем фильтром всю базу: иначе вакансия, выпавшая из выдачи,
+    # навсегда остаётся со старым вердиктом, и починенное стоп-слово до
+    # человека не доезжает.
+    changed = db.reclassify_all(matching.classify)
+    if changed:
+        logger.info("переоценено вакансий после правки фильтра: %s", changed)
+
+    # Закрываем то, что пропало из выдачи источников с полным каталогом
+    for source in search.FULL_CATALOG_SOURCES & set(sources):
+        alive = [v["uid"] for v in items if v["source"] == source]
+        if alive:
+            gone = db.close_missing(source, alive)
+            if gone:
+                logger.info("%s: снято с публикации %s вакансий", source, gone)
 
     # Догоняем накопленное: у вакансий, собранных до того, как бот научился
     # читать формат со страницы, он так и остался пустым. Разбираем их
@@ -243,6 +263,28 @@ def may_send_now(st):
     return True
 
 
+async def drop_closed(vacancies):
+    """Отсеивает вакансии, которые успели снять, пока они ждали очереди.
+
+    Проверяем прямо перед отправкой: за раз уходит не больше max_per_run
+    штук, так что это несколько запросов, зато в ленту не попадает архив.
+    """
+    if not vacancies:
+        return vacancies
+    alive, closed = [], []
+    import httpx
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        for vac in vacancies:
+            if await search.is_alive(client, vac):
+                alive.append(vac)
+            else:
+                closed.append(vac["uid"])
+    if closed:
+        db.mark_closed(closed)
+        logger.info("снятых вакансий не отправлено: %s", len(closed))
+    return alive
+
+
 async def send_vacancies(bot, chat_id, vacancies):
     sent_uids = []
     for vac in vacancies:
@@ -266,7 +308,7 @@ async def deliver_all(app):
         st = db.get_settings(user["user_id"])
         if not may_send_now(st):
             continue
-        picks = pick_for_user(st, limit=int(st.get("max_per_run", 8)))
+        picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 8))))
         if not picks:
             continue
         try:
@@ -322,7 +364,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Собираю первую подборку, это займёт полминуты…")
         await collect()
         st = db.get_settings(user.id)
-        picks = pick_for_user(st, limit=5)
+        picks = await drop_closed(pick_for_user(st, limit=5))
         if not picks:
             await update.message.reply_text(
                 "Сейчас свежих подходящих вакансий нет — пришлю, как появятся.")
@@ -370,7 +412,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = await update.message.reply_text("Проверяю источники…")
     st = db.get_settings(update.effective_user.id)
     await collect(set(db.active_sources(st)))
-    picks = pick_for_user(st, limit=int(st.get("max_per_run", 8)))
+    picks = await drop_closed(pick_for_user(st, limit=int(st.get("max_per_run", 8))))
     await note.delete()
     if not picks:
         await update.message.reply_text(

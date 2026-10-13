@@ -257,6 +257,41 @@ async def fetch_hh_employer(client, employer_id, period=30):
         return []
 
 
+# ------------------------------------------------- проверка «жива ли ещё»
+
+# Источники, которые отдают полный каталог вакансий. Если вакансии этого
+# источника нет в свежей выдаче - значит её сняли. Для поисковых выдач
+# (hh, Хабр, LinkedIn) так рассуждать нельзя: там вакансия выпадает из
+# ответа просто потому, что не подошла под запрос.
+FULL_CATALOG_SOURCES = {"getmatch", "avito", "2gis", "dodo", "aviasales"}
+
+# Как выглядит снятая вакансия на странице
+CLOSED_MARKERS = re.compile(
+    r"вакансия\s+в\s+архиве|вакансия\s+закрыта|вакансия\s+удалена"
+    r"|больше\s+не\s+актуальн|закрыт\w+\s+ваканс'?и"
+    r"|no\s+longer\s+accepting\s+applications|this\s+job\s+is\s+no\s+longer"
+    r"|вакансия\s+не\s+найдена|offer\s+is\s+not\s+active",
+    re.IGNORECASE)
+
+
+async def is_alive(client, vac):
+    """Открыта ли ещё вакансия. При любой неясности считаем, что открыта:
+    лучше показать лишнее, чем молча проглотить живую вакансию."""
+    url = vac.get("url")
+    if not url:
+        return True
+    try:
+        resp = await client.get(url, headers={"User-Agent": UA})
+    except Exception as exc:
+        logger.info("не смог проверить %s: %s", vac.get("uid"), type(exc).__name__)
+        return True
+    if resp.status_code in (404, 410):
+        return False
+    if resp.status_code != 200:
+        return True
+    return not CLOSED_MARKERS.search(resp.text[:400000])
+
+
 # ------------------------------------------- скрытая удалёнка в описании
 
 # В шапке вакансии стоит «гибрид» или «офис», а в тексте — «возможна
@@ -268,7 +303,7 @@ REMOTE_IN_TEXT = re.compile(
     r"|можно\s+(?:работать\s+)?удал[ёе]нно"
     r"|удал[ёе]нн\w+\s+(?:работа|формат|график|режим|сотрудничеств|занятост)"
     r"|готовы\s+(?:обсуд|рассмотр)\w*\s+(?:\w+\s+){0,3}удал[ёе]нк"
-    r"|формат\w*\s+(?:работы\s+)?(?:обсужда|гибк|на\s+выбор|по\s+договор|любой)"
+    r"|формат\w*\s+(?:работы\s+)?(?:обсужда|на\s+выбор|по\s+договор)"
     r"|(?:в\s+)?офисе?\s+или\s+удал[ёе]нно"
     r"|офис\s+по\s+желанию"
     r"|можно\s+из\s+дома"
@@ -286,6 +321,13 @@ REMOTE_IN_TEXT = re.compile(
 
 # Рядом с теми же словами часто стоит отказ — «удалённая работа не
 # предполагается». Такие совпадения не считаем.
+# Гибридная оговорка рядом с совпадением: «частично удалённая работа»,
+# «2 дня в офисе» - это гибрид, а не удалёнка по договорённости.
+HYBRID_NEARBY = re.compile(
+    r"частичн\w*\s+удал|гибрид|\d\s*(?:дн\w+|раза?)\s+в\s+(?:офисе|неделю)"
+    r"|\d\s*/\s*\d\s*(?:дн|в\s+офисе)|не\s+мен\w+\s+\d\s*дн",
+    re.IGNORECASE)
+
 REMOTE_DENIAL = re.compile(
     r"не\s+предполага|не\s+рассматрива|не\s+предусмотрен|без\s+удал[ёе]нк"
     r"|только\s+офис|исключительно\s+в\s+офисе|нет\s+удал[ёе]нк"
@@ -297,13 +339,19 @@ ENRICH_LIMIT = 25       # сколько вакансий за цикл догр
 
 
 def remote_mentioned(text):
-    """Есть ли в описании обещание удалёнки, не перечёркнутое отказом."""
+    """Фраза, которой в описании обещают удалёнку, или None.
+
+    Возвращаем именно фразу, чтобы потом показать её в карточке: обещание
+    «удалёнка по договорённости» должно быть проверяемым, а не на веру.
+    """
     plain = _strip_tags(text)
     for m in REMOTE_IN_TEXT.finditer(plain):
         around = plain[max(0, m.start() - REMOTE_WINDOW):m.end() + REMOTE_WINDOW]
-        if not REMOTE_DENIAL.search(around):
-            return True
-    return False
+        if REMOTE_DENIAL.search(around) or HYBRID_NEARBY.search(around):
+            continue
+        quote = plain[max(0, m.start() - 40):m.end() + 60].strip()
+        return re.sub(r"\s+", " ", quote)
+    return None
 
 
 async def fetch_hh_description(client, vacancy_id):
@@ -347,10 +395,12 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
                             vac["uid"], type(exc).__name__, exc)
                 continue
             vac["remote_checked"] = True
-            if description and remote_mentioned(description):
+            quote = remote_mentioned(description) if description else None
+            if quote:
                 formats = [f for f in (vac.get("work_format") or "").split(",") if f]
                 formats.append("remote_maybe")
                 vac["work_format"] = ",".join(dict.fromkeys(formats))
+                vac["remote_note"] = quote[:200]
                 found += 1
     logger.info("описаний прочитано %s, скрытой удалёнки найдено %s",
                 len(targets), found)

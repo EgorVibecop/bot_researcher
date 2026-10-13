@@ -105,6 +105,8 @@ def init_db():
             categories TEXT,
             relevant INTEGER DEFAULT 0,
             remote_checked INTEGER DEFAULT 0,
+            closed INTEGER DEFAULT 0,
+            remote_note TEXT,
             first_seen TEXT
         );
 
@@ -142,6 +144,10 @@ def _migrate(conn):
     vac_have = {row["name"] for row in conn.execute("PRAGMA table_info(vacancies)")}
     if "remote_checked" not in vac_have:
         conn.execute("ALTER TABLE vacancies ADD COLUMN remote_checked INTEGER DEFAULT 0")
+    if "closed" not in vac_have:
+        conn.execute("ALTER TABLE vacancies ADD COLUMN closed INTEGER DEFAULT 0")
+    if "remote_note" not in vac_have:
+        conn.execute("ALTER TABLE vacancies ADD COLUMN remote_note TEXT")
 
     have = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
     columns = {
@@ -291,18 +297,76 @@ def upsert_vacancies(items):
         conn.execute(
             "INSERT INTO vacancies (uid, source, ext_id, title, company, area, url,"
             " published_at, salary_from, salary_to, currency, work_format, experience,"
-            " categories, relevant, first_seen, remote_checked)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " categories, relevant, first_seen, remote_checked, remote_note)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (v["uid"], v["source"], v["ext_id"], v["title"], v["company"], v["area"],
              v["url"], v["published_at"], v.get("salary_from"), v.get("salary_to"),
              v.get("currency", ""), v.get("work_format", ""), v.get("experience", ""),
              ",".join(v.get("categories") or []), 1 if v.get("relevant") else 0, stamp,
-             1 if v.get("remote_checked") else 0),
+             1 if v.get("remote_checked") else 0, v.get("remote_note")),
         )
         fresh.append(v)
     conn.commit()
     conn.close()
     return fresh
+
+
+def reclassify_all(classify):
+    """Перепроверяет фильтром все вакансии в базе, а не только свежие.
+
+    Раньше вердикт обновлялся лишь у тех, что попались в текущей выдаче.
+    Вакансия, выпавшая из поиска (кончилось окно, не подошла под запрос),
+    навсегда оставалась с устаревшим вердиктом - и починенное стоп-слово
+    до человека не доезжало. Проверка локальная, сети не трогает.
+    """
+    conn = get_conn()
+    rows = conn.execute("SELECT uid, title, relevant, categories FROM vacancies").fetchall()
+    changes = []
+    for row in rows:
+        cats = classify(row["title"])
+        relevant = 1 if cats is not None else 0
+        joined = ",".join(cats or [])
+        if relevant != (row["relevant"] or 0) or joined != (row["categories"] or ""):
+            changes.append((relevant, joined, row["uid"]))
+    if changes:
+        conn.executemany(
+            "UPDATE vacancies SET relevant = ?, categories = ? WHERE uid = ?", changes)
+        conn.commit()
+    conn.close()
+    return len(changes)
+
+
+def mark_closed(uids):
+    """Помечает вакансии снятыми - в ленту они больше не попадут."""
+    if not uids:
+        return
+    conn = get_conn()
+    conn.executemany("UPDATE vacancies SET closed = 1 WHERE uid = ?",
+                     [(uid,) for uid in uids])
+    conn.commit()
+    conn.close()
+
+
+def close_missing(source, alive_uids):
+    """Закрывает вакансии источника, которых больше нет в его выдаче.
+
+    Годится только для источников, отдающих полный каталог (getmatch,
+    Авито, 2ГИС, Dodo, Aviasales). Для поисковых выдач вроде hh так делать
+    нельзя: там вакансия выпадает из ответа просто потому, что не подошла
+    под запрос или вышла из окна поиска.
+    """
+    if not alive_uids:
+        return 0
+    conn = get_conn()
+    alive = list(alive_uids)
+    marks = ",".join("?" * len(alive))
+    cur = conn.execute(
+        "UPDATE vacancies SET closed = 1 WHERE source = ? AND IFNULL(closed, 0) = 0"
+        " AND uid NOT IN (" + marks + ")", [source] + alive)
+    conn.commit()
+    closed = cur.rowcount
+    conn.close()
+    return closed
 
 
 def unchecked_remote(limit=15, days=30):
@@ -335,8 +399,9 @@ def save_formats(items):
         return
     conn = get_conn()
     conn.executemany(
-        "UPDATE vacancies SET work_format = ?, remote_checked = 1 WHERE uid = ?",
-        [(v.get("work_format") or "", v["uid"]) for v in items])
+        "UPDATE vacancies SET work_format = ?, remote_checked = 1, remote_note = ?"
+        " WHERE uid = ?",
+        [(v.get("work_format") or "", v.get("remote_note"), v["uid"]) for v in items])
     conn.commit()
     conn.close()
 
@@ -365,7 +430,7 @@ def unsent_for_user(user_id, days=30, limit=500):
     rows = conn.execute(
         "SELECT v.* FROM vacancies v"
         " LEFT JOIN sent s ON s.uid = v.uid AND s.user_id = ?"
-        " WHERE s.uid IS NULL AND v.published_at >= ?"
+        " WHERE s.uid IS NULL AND v.published_at >= ? AND IFNULL(v.closed, 0) = 0"
         " ORDER BY v.published_at DESC LIMIT ?",
         (user_id, since, limit),
     ).fetchall()

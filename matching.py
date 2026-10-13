@@ -99,6 +99,10 @@ STOP_PATTERNS = _c([
     r"аналитик\w*\s+данных", r"data\s*analyst", r"дата[-\s]?аналитик",
     r"\bbi[-\s]?аналитик", r"аналитик\w*\s+bi", r"data\s*scien",
     r"\bscientist\b", r"machine\s*learning", r"\bml\b", r"\bnlp\b",
+    # биржа и алготрейдинг: «Paid Research Engagement — Systematic Trading»
+    r"\btrading\b", r"\btrader\b", r"трейдинг", r"трейдер", r"\bhft\b",
+    r"quant\w*\s+(?:trading|trader|fund)", r"\bhedge\s+fund\b",
+    r"алгоритмическ\w+\s+торг", r"биржев",
     r"систем\w+\s+аналитик", r"бизнес[-\s]?аналитик", r"финансов\w+\s+аналитик",
     r"веб[-\s]?аналитик", r"продуктов\w+\s+аналитик", r"1[cс][-\s]?аналитик",
     r"аналитик\w*\s+1[cс]", r"аналитик\w*\s+отчётност",
