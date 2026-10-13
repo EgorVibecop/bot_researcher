@@ -1322,18 +1322,15 @@ def _augment_formats(item):
 # пункты меню вроде «Стажировки» отсеются сами.
 CAREER_PAGES = [
     ("Selectel", "https://selectel.ru/careers/all/"),
-    ("Ozon", "https://job.ozon.ru/vacancy/"),
-    ("Т-Банк", "https://career.tbank.ru/vacancies"),
-    ("VK", "https://jobs.vk.company/vacancy/"),
-    ("Wildberries", "https://career.wildberries.ru/vacancies"),
-    ("Lamoda", "https://jobs.lamoda.ru/vacancy"),
-    ("Самокат", "https://job.samokat.ru/vacancies"),
-    ("Купер", "https://career.kuper.ru/vacancies"),
-    ("X5", "https://x5.ru/ru/career/vacancies/"),
-    ("Skyeng", "https://vacancies.skyeng.ru/"),
     ("Яндекс", "https://yandex.ru/jobs/vacancies"),
     ("Контур", "https://kontur.ru/career/vacancies"),
-    ("Positive Technologies", "https://www.ptsecurity.com/ru-ru/about/vacancies/"),
+    ("Ozon", "https://job.ozon.ru/"),
+    ("Самокат", "https://job.samokat.ru/"),
+    ("X5", "https://x5.ru/ru/career/"),
+    ("Lamoda", "https://job.lamoda.ru/"),
+    ("Т-Банк", "https://www.tbank.ru/career/"),
+    ("VK", "https://team.vk.company/vacancy/"),
+    ("Skyeng", "https://vacancies.skyeng.ru/"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
@@ -1397,12 +1394,21 @@ async def fetch_careers(client):
     """Обходит карьерные разделы IT-компаний."""
     out = []
     for company, url in CAREER_PAGES:
-        try:
-            resp = await client.get(url, headers={"User-Agent": UA})
-            resp.raise_for_status()
-        except Exception as exc:
-            logger.info("careers %s: страница не открылась: %s %s",
-                        company, type(exc).__name__, exc)
+        # Часть сайтов отдаёт 403/404 на прямой адрес раздела, но открывает
+        # корень; ещё часть просит обычные браузерные заголовки.
+        headers = {"User-Agent": UA, "Accept-Language": "ru-RU,ru;q=0.9",
+                   "Accept": "text/html,application/xhtml+xml"}
+        resp = None
+        for attempt in (url, re.sub(r"(https?://[^/]+/).*", r"\1", url)):
+            try:
+                got = await client.get(attempt, headers=headers)
+                got.raise_for_status()
+                resp = got
+                break
+            except Exception as exc:
+                logger.info("careers %s: %s не открылся: %s %s",
+                            company, attempt, type(exc).__name__, exc)
+        if resp is None:
             continue
         found = _ld_jobs(resp.text) or _page_links(resp.text, str(resp.url))
         for raw in found:
