@@ -32,7 +32,8 @@ STOP = [
     r"machine\s*learning", r"\bml[-\s]?(инженер|engineer|ops)", r"\bmlops\b",
     r"нейросет", r"computer\s+vision", r"\bnlp\b",
     # смежные аналитики не про данные
-    r"1[cс][-\s]?аналитик", r"аналитик\w*\s+1[cс]", r"\bsap\b", r"\babap\b",
+    # 1С в любом виде: «Аналитик в команду 1C HR & Salary Automation»
+    r"\b1[cс]\b", r"\bsap\b", r"\babap\b",
     r"аналитик\w*\s+(?:по\s+)?(?:информационн|кибер)", r"\bsoc\b",
     r"\bиб\b", r"ит\s*/\s*иб",
     r"безопасност", r"security", r"пентест", r"уязвимост", r"\bthreat\b",
