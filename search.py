@@ -209,11 +209,99 @@ async def fetch_hh(client, query, area=113, period=7, pages=1, remote=False):
     return out
 
 
+# ------------------------------------------------------------- rabota.ru
+
+# Крупный агрегатор, не только IT. Вакансии отдаёт разметкой schema.org,
+# поэтому разбираем тем же кодом, что и карьерные сайты.
+async def fetch_rabota(client, query):
+    try:
+        resp = await client.get("https://www.rabota.ru/vacancy",
+                                params={"query": query},
+                                headers={"User-Agent": UA})
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("rabota.ru: запрос не удался (%s): %s %s",
+                       query[:30], type(exc).__name__, exc)
+        return []
+
+    out = []
+    for raw in _ld_jobs(resp.text):
+        url = raw["url"]
+        if not raw["title"] or not url:
+            continue
+        vid = hashlib.md5(url.encode("utf-8")).hexdigest()[:12]
+        out.append({
+            "uid": "rabota:" + vid,
+            "source": "rabota",
+            "ext_id": vid,
+            "title": raw["title"],
+            "company": "",
+            "area": raw["area"],
+            "url": url,
+            "published_at": raw["published_at"],
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "RUR",
+            "work_format": "",
+            "experience": "",
+        })
+    return out
+
+
+# ------------------------------------------------------------ zarplata.ru
+
+# Сайт из той же семьи, что и hh: страница отдаёт то же состояние
+# HH-Lux-InitialState, поэтому разбор берём готовый. Пул вакансий при этом
+# свой - больше регионов и компаний, которых на hh нет.
+ZP_SEARCH = "https://www.zarplata.ru/search/vacancy"
+
+
+async def fetch_zarplata(client, query, area=113, period=7, pages=1):
+    out = []
+    for page in range(pages):
+        try:
+            resp = await _hh_get(client, ZP_SEARCH,
+                                 {"text": query, "area": area, "search_field": "name",
+                                  "order_by": "publication_time", "search_period": period,
+                                  "items_on_page": 50, "page": page},
+                                 {"User-Agent": UA})
+            if resp is None:
+                break
+            m = re.search(
+                r'<template[^>]*id="HH-Lux-InitialState"[^>]*>(.*?)</template>',
+                resp.text, re.S)
+            if not m:
+                logger.warning("zarplata: не нашёл состояние страницы (%s)", query[:40])
+                break
+            items = (json.loads(html_mod.unescape(m.group(1)))
+                     .get("vacancySearchResult") or {}).get("vacancies") or []
+            for raw in items:
+                vac = _hh_item(raw)
+                vac["uid"] = "zp:" + vac["ext_id"]
+                vac["source"] = "zarplata"
+                out.append(vac)
+            if len(items) < 50:
+                break
+        except Exception as exc:
+            logger.warning("zarplata: запрос не удался (%s): %s", query[:40], exc)
+            break
+    return out
+
+
 # Компании, которые интересны отдельно: их вакансии часто не попадают в общую
 # выдачу (висят дольше окна поиска или названы по-своему). id работодателя на
 # hh — из адреса hh.ru/employer/<id>.
 HH_EMPLOYERS = {
     588914: "Aviasales",
+    776314: "Золотое Яблоко",
+    2180: "Ozon",
+    78638: "Т-Банк",
+    87021: "Wildberries",
+    9352463: "X5 Tech",
+    1740: "Яндекс",
+    780654: "Lamoda",
+    633069: "Selectel",
+    41862: "Контур",
     816144: "ВкусВилл",
     10317521: "Додо Пицца",
     1429999: "Циан",
@@ -1350,6 +1438,12 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
                 # обрезаются по 50 самых свежих, и remote в них не попадает
                 tasks.append(fetch_hh(client, q, area=area, period=period,
                                       pages=HH_PAGES, remote=True))
+        if "rabota" in sources:
+            tasks += [fetch_rabota(client, q) for q in habr_queries]
+        if "zarplata" in sources:
+            for q in hh_queries:
+                tasks.append(fetch_zarplata(client, q, area=area, period=period,
+                                            pages=HH_PAGES))
         if "habr" in sources:
             tasks += [fetch_habr(client, q) for q in habr_queries]
             tasks += [fetch_habr(client, q, remote=True) for q in habr_queries]

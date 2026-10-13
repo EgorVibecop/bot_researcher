@@ -27,7 +27,8 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 # Категории и формат работы зависят от профиля: у исследователя одни,
 # у аналитика другие (и офиса в списке нет вовсе).
 DEFAULT_CATEGORIES = ",".join(matching.ALL_CATEGORY_IDS)
-DEFAULT_SOURCES = "hh,habr,getmatch,geekjob,itone,superjob,tg,linkedin,companies"
+DEFAULT_SOURCES = ("hh,zarplata,rabota,habr,getmatch,geekjob,itone,superjob,"
+                   "tg,linkedin,companies")
 
 DEFAULT_WORK_FORMATS = matching.DEFAULT_WORK_FORMATS
 

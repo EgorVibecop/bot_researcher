@@ -75,7 +75,7 @@ REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санк
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
 # Сколько вакансий уходит за одну отправку: переключается в настройках
 BATCH_STEPS = [8, 15, 25, 50]
-SOURCE_NAMES = {"hh": "hh.ru", "habr": "Хабр Карьера", "getmatch": "getmatch",
+SOURCE_NAMES = {"hh": "hh.ru", "zarplata": "Зарплата.ру", "rabota": "Работа.ру", "habr": "Хабр Карьера", "getmatch": "getmatch",
                 "tg": "Telegram", "geekjob": "Geekjob",
                 "itone": "IT_One", "superjob": "SuperJob", "linkedin": "LinkedIn",
                 "companies": "Компании", "aviasales": "Aviasales",
