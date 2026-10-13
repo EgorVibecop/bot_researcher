@@ -325,6 +325,11 @@ TITLE = "Радар вакансий для исследователей"
 DEFAULT_WORK_FORMATS = "remote"
 SETTING_FORMATS = ["remote", "hybrid", "office"]
 TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters"]
+EMPLOYER_QUERY = (
+    "исследователь OR исследователи OR исследованиям OR исследований OR "
+    "researcher OR research OR ресерчер OR ресёрч OR ресерч OR "
+    "UX OR CX OR custdev OR юзабилити OR социолог"
+)
 WELCOME_BODY = (
     "Слежу за hh.ru, Хабр Карьерой, getmatch, LinkedIn, сайтами компаний и тг-каналами:\n"
     "UX / CX / Product / Market Research, исследователь опыта, социолог, CustDev.\n\n"
@@ -356,3 +361,4 @@ if PROFILE == "analyst":
     DEFAULT_WORK_FORMATS = _p.DEFAULT_WORK_FORMATS
     SETTING_FORMATS = _p.SETTING_FORMATS
     WELCOME_BODY = _p.WELCOME_BODY
+    EMPLOYER_QUERY = _p.EMPLOYER_QUERY

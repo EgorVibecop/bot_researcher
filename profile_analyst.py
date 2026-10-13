@@ -138,6 +138,12 @@ HH_QUERIES = [
     'аналитик OR аналитика OR analyst OR analytics',
 ]
 
+# Запрос по названию для карьерных страниц компаний на hh
+EMPLOYER_QUERY = (
+    "аналитик OR аналитика OR analyst OR analytics OR BI OR "
+    "\"data analyst\" OR \"инженер данных\" OR \"data engineer\""
+)
+
 HABR_QUERIES = [
     "аналитик данных",
     "BI аналитик",

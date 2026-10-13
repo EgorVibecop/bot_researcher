@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+import matching
 import tg_source
 
 logger = logging.getLogger(__name__)
@@ -224,11 +225,8 @@ HH_EMPLOYERS = {
 
 # У работодателя может висеть тысяча вакансий (курьеры, продавцы), поэтому
 # спрашиваем сразу с исследовательским запросом по названию.
-EMPLOYER_QUERY = (
-    "исследователь OR исследователи OR исследованиям OR исследований OR "
-    "researcher OR research OR ресерчер OR ресёрч OR ресерч OR "
-    "UX OR CX OR custdev OR юзабилити OR социолог"
-)
+# Сам запрос зависит от профиля: исследователь или аналитик.
+EMPLOYER_QUERY = matching.EMPLOYER_QUERY
 
 
 async def fetch_hh_employer(client, employer_id, period=30):
