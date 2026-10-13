@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+import db
 import matching
 import tg_source
 
@@ -521,6 +522,47 @@ async def fetch_hh_description(client, vacancy_id):
     return view.get("description") or ""
 
 
+async def accred_by_name(client, company):
+    """Аккредитация компании по названию — через выдачу hh.
+
+    Отвечаем только «yes»: у крупных компаний на hh несколько юрлиц
+    («Авито: бэк-офис», «Яндекс Крауд»), и отметка у них разная, поэтому
+    «нет» по названию — это гадание, а не факт. Результат запоминаем.
+    """
+    name = (company or "").strip()
+    if len(name) < 3:
+        return ""
+    known = db.accred_cached(name)
+    if known is not None:
+        return known
+
+    found = ""
+    try:
+        resp = await _hh_get(client, "https://hh.ru/search/vacancy",
+                             {"text": name, "area": 113, "items_on_page": 20},
+                             {"User-Agent": UA})
+        if resp is not None:
+            m = re.search(
+                r'<template[^>]*id="HH-Lux-InitialState"[^>]*>(.*?)</template>',
+                resp.text, re.S)
+            if m:
+                vacs = (json.loads(html_mod.unescape(m.group(1)))
+                        .get("vacancySearchResult") or {}).get("vacancies") or []
+                low = name.lower()
+                for raw in vacs:
+                    comp = raw.get("company") or {}
+                    cname = (comp.get("visibleName") or comp.get("name") or "").lower()
+                    if (low in cname or cname in low) and comp.get("accreditedITEmployer"):
+                        found = "yes"
+                        break
+    except Exception as exc:
+        logger.info("аккредитация %s: не спросил: %s %s", name, type(exc).__name__, exc)
+        return ""
+
+    db.remember_accred(name, found)
+    return found
+
+
 async def enrich_remote(items, limit=ENRICH_LIMIT):
     """Дочитывает описания вакансий, у которых в шапке удалёнки нет.
 
@@ -555,6 +597,11 @@ async def enrich_remote(items, limit=ENRICH_LIMIT):
             # точнее слов в описании, поэтому не затираем.
             if description and not vac.get("it_accred"):
                 vac["it_accred"] = it_accredited(description) or ""
+            # Вакансия не с hh и в описании ничего нет - спросим у hh про
+            # саму компанию: она могла не публиковаться там этой вакансией,
+            # но сама в реестре быть.
+            if not vac.get("it_accred") and vac.get("source") != "hh":
+                vac["it_accred"] = await accred_by_name(client, vac.get("company"))
                 if vac["it_accred"] == "yes":
                     accred += 1
             quote = remote_mentioned(description) if description else None

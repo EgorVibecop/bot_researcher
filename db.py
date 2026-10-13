@@ -117,6 +117,12 @@ def init_db():
             first_seen TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS employer_accred (
+            name TEXT PRIMARY KEY,
+            accred TEXT,
+            checked_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS sent (
             user_id INTEGER NOT NULL,
             uid TEXT NOT NULL,
@@ -488,6 +494,29 @@ def recent_relevant(days=14, limit=300):
         " ORDER BY published_at DESC LIMIT ?", (since, limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def accred_cached(name):
+    """Что мы уже знаем про аккредитацию этой компании: 'yes', '' или None.
+
+    None значит «не спрашивали», пустая строка - «спрашивали, ответа нет»:
+    второй раз ходить за тем же не нужно.
+    """
+    conn = get_conn()
+    row = conn.execute("SELECT accred FROM employer_accred WHERE name = ?",
+                       (name.strip().lower(),)).fetchone()
+    conn.close()
+    return None if row is None else (row["accred"] or "")
+
+
+def remember_accred(name, accred):
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO employer_accred (name, accred, checked_at)"
+        " VALUES (?, ?, ?)",
+        (name.strip().lower(), accred or "", now().isoformat(timespec="seconds")))
+    conn.commit()
+    conn.close()
 
 
 def mark_sent(user_id, uids):
