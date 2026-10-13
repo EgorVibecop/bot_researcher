@@ -164,12 +164,14 @@ def format_vacancy(vac):
     tail = []
     if vac.get("experience"):
         tail.append("опыт: " + vac["experience"])
-    tail.append(vac.get("published_at", "")[:10])
+    stamp = (vac.get("published_at") or vac.get("first_seen") or "")[:10]
+    if stamp:
+        tail.append(stamp)
     lines.append("🧭 " + " · ".join(t for t in tail if t))
 
     # Одна вакансия может висеть сразу на нескольких сервисах — тогда
     # у карточки будет несколько ссылок, по одной на каждый.
-    links = vac.get("links") or [(vac.get("source", ""), vac.get("url", ""))]
+    links = vac.get("links") or [(vac.get("source") or "", vac.get("url") or "")]
     seen_urls, buttons = set(), []
     for source, url in links:
         if not url or url in seen_urls:
@@ -329,7 +331,11 @@ async def send_more_button(bot, chat_id, left):
 async def send_vacancies(bot, chat_id, vacancies):
     sent_uids = []
     for vac in vacancies:
-        text, keyboard = format_vacancy(vac)
+        try:
+            text, keyboard = format_vacancy(vac)
+        except Exception:
+            logger.exception("не смог собрать карточку %s", vac.get("uid"))
+            continue
         try:
             await bot.send_message(
                 chat_id=chat_id, text=text, reply_markup=keyboard,
