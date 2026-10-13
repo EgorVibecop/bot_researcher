@@ -167,7 +167,8 @@ def format_vacancy(vac):
     stamp = (vac.get("published_at") or vac.get("first_seen") or "")[:10]
     if stamp:
         tail.append(stamp)
-    lines.append("🧭 " + " · ".join(t for t in tail if t))
+    if any(tail):
+        lines.append("🧭 " + " · ".join(t for t in tail if t))
 
     # Одна вакансия может висеть сразу на нескольких сервисах — тогда
     # у карточки будет несколько ссылок, по одной на каждый.
