@@ -194,10 +194,19 @@ def format_vacancy(vac):
 # Чем закончился последний обход источников: показываем в /stats,
 # иначе на вопрос «почему тихо» ответить нечем.
 LAST_CYCLE = {}
+# Обход источников идёт минутами. Если в это время нажать «Найти сейчас»,
+# раньше запускался второй такой же обход: двойная нагрузка на сайты и
+# двойные записи в логе. Пускаем по одному.
+COLLECT_LOCK = asyncio.Lock()
 
 
 async def collect(sources=None):
     """Опрашивает источники, размечает категории, кладёт в базу."""
+    async with COLLECT_LOCK:
+        return await _collect(sources)
+
+
+async def _collect(sources):
     sources = sources or set(db.DEFAULT_SOURCES.split(","))
     items = await search.fetch_all(
         sources, matching.HH_QUERIES, matching.HABR_QUERIES,

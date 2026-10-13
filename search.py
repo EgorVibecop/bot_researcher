@@ -1321,16 +1321,14 @@ def _augment_formats(item):
 # вакансий. Название вакансии всё равно проходит общий фильтр, так что
 # пункты меню вроде «Стажировки» отсеются сами.
 CAREER_PAGES = [
+    # Оставлены только те, что реально открываются с сервера и отдают
+    # карточки. Ozon и Самокат отвечают 403 на запросы с хостинга, у Т-Банка
+    # хостинг не проверяет сертификат, X5, Lamoda и Skyeng отдают пустой
+    # каркас на JS. Их вакансии приходят со страниц работодателей на hh.
     ("Selectel", "https://selectel.ru/careers/all/"),
     ("Яндекс", "https://yandex.ru/jobs/vacancies"),
     ("Контур", "https://kontur.ru/career/vacancies"),
-    ("Ozon", "https://job.ozon.ru/"),
-    ("Самокат", "https://job.samokat.ru/"),
-    ("X5", "https://x5.ru/ru/career/"),
-    ("Lamoda", "https://job.lamoda.ru/"),
-    ("Т-Банк", "https://www.tbank.ru/career/"),
     ("VK", "https://team.vk.company/vacancy/"),
-    ("Skyeng", "https://vacancies.skyeng.ru/"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
