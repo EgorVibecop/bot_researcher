@@ -313,15 +313,19 @@ async def pick_alive(st, limit):
     pending = [v for v in db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS)
                if db.matches_user(v, st, includes, excludes, muted)]
     if not limit:
-        return await drop_closed(pending)
+        alive = await drop_closed(pending)
+        return alive, len(pending) - len(alive)
 
-    alive, start = [], 0
+    alive, start, checked = [], 0, 0
     # Потолок попыток, чтобы на мёртвой пачке не ходить по всей очереди.
     while len(alive) < limit and start < len(pending) and start < limit * 6:
         chunk = pending[start:start + limit]
         alive += await drop_closed(chunk)
         start += len(chunk)
-    return alive[:limit]
+        checked += len(chunk)
+    # Сколько из проверенных оказались сняты с публикации: это и есть вторая
+    # причина, по которой очередь уменьшается не на размер порции.
+    return alive[:limit], checked - len(alive)
 
 
 def may_send_now(st):
@@ -363,14 +367,23 @@ MORE_KEYBOARD = InlineKeyboardMarkup([[
 ]])
 
 
-async def send_more_button(bot, chat_id, left):
-    """Под пачкой показываем, сколько ещё ждёт, и даём добрать вручную."""
-    if not left:
+async def send_more_button(bot, chat_id, left, sent=0, closed=0):
+    """Под пачкой — что ушло, что отвалилось и сколько осталось.
+
+    Очередь убывает не только на размер порции: по дороге бот выкидывает
+    вакансии, которые успели снять с публикации, и без этой строки разница
+    выглядит случайной.
+    """
+    if not left and not sent:
         return
-    await bot.send_message(
-        chat_id=chat_id,
-        text="В очереди ещё " + str(left) + " подходящих вакансий.",
-        reply_markup=MORE_KEYBOARD)
+    parts = []
+    if sent:
+        parts.append("отправил " + str(sent))
+    if closed:
+        parts.append("снято с публикации " + str(closed))
+    parts.append("в очереди ещё " + str(left))
+    await bot.send_message(chat_id=chat_id, text=" · ".join(parts).capitalize() + ".",
+                           reply_markup=MORE_KEYBOARD if left else None)
 
 
 async def send_vacancies(bot, chat_id, vacancies):
@@ -413,15 +426,16 @@ async def deliver_all(app):
             continue
         limit = int(st["max_per_run"] or 0)
         queue = pick_for_user(st)
-        picks = await pick_alive(st, limit)
-        logger.info("пользователь %s: в очереди %s, порция %s, живых к отправке %s",
-                    user["user_id"], len(queue), limit or "все", len(picks))
+        picks, closed = await pick_alive(st, limit)
+        logger.info("пользователь %s: в очереди %s, порция %s, живых к отправке %s,"
+                    " снято с публикации %s", user["user_id"], len(queue),
+                    limit or "все", len(picks), closed)
         if not picks:
             continue
         try:
             sent_uids = await send_vacancies(app.bot, user["chat_id"] or user["user_id"], picks)
             await send_more_button(app.bot, user["chat_id"] or user["user_id"],
-                                   len(queue) - len(picks))
+                                   len(pick_for_user(st)), len(sent_uids), closed)
         except Forbidden:
             logger.info("пользователь %s заблокировал бота - ставлю на паузу", user["user_id"])
             db.set_setting(user["user_id"], "paused", 1)
@@ -475,7 +489,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Повторный /start раньше присылал только приветствие, и выглядело
         # это так, будто бот застыл. Отдаём то, что уже лежит в очереди.
         st = db.get_settings(user.id)
-        picks = await pick_alive(st, int(st["max_per_run"]))
+        picks, _ = await pick_alive(st, int(st["max_per_run"]))
         if picks:
             sent = await send_vacancies(context.bot, update.effective_chat.id, picks)
             db.mark_sent(user.id, sent)
@@ -492,7 +506,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         st = db.get_settings(user.id)
         # Первая подборка должна показать охват: пяти карточек мало,
         # человек видит один источник и думает, что бот не работает.
-        picks = await pick_alive(st, FIRST_BATCH)
+        picks, _ = await pick_alive(st, FIRST_BATCH)
         if not picks:
             await update.message.reply_text(
                 "Сейчас свежих подходящих вакансий нет — пришлю, как появятся.")
@@ -539,18 +553,18 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     limit = int(st["max_per_run"] or 0)
     # Сначала смотрим в очередь: опрос всех источников идёт пару минут, и
     # гонять его ради вакансий, которые уже лежат в базе, незачем.
-    picks = await pick_alive(st, limit)
+    picks, closed = await pick_alive(st, limit)
     if picks:
         sent_uids = await send_vacancies(context.bot, update.effective_chat.id, picks)
         db.mark_sent(update.effective_user.id, sent_uids)
         await send_more_button(context.bot, update.effective_chat.id,
-                               len(pick_for_user(st)))
+                               len(pick_for_user(st)), len(sent_uids), closed)
         return
 
     note = await update.message.reply_text(
         "Очередь пуста, обхожу источники — это занимает пару минут…")
     await collect(set(db.active_sources(st)))
-    picks = await pick_alive(st, limit)
+    picks, _ = await pick_alive(st, limit)
     await note.delete()
     if not picks:
         await update.message.reply_text(
@@ -599,7 +613,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st = db.get_settings(user_id)
     # Ждать следующей проверки незачем: показываем сразу большую порцию,
     # остальное уйдёт обычным порядком.
-    picks = await pick_alive(st, FIRST_BATCH)
+    picks, _ = await pick_alive(st, FIRST_BATCH)
     if not picks:
         await update.message.reply_text(
             "Историю очистил, но показывать пока нечего.", reply_markup=MAIN_MENU)
@@ -842,7 +856,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отдаём следующие N из очереди - те, которых человек ещё не видел.
         count = int(data.split(":", 1)[1])
         st = db.get_settings(user_id)
-        picks = await pick_alive(st, count)
+        picks, closed = await pick_alive(st, count)
         await query.answer("Собираю…" if picks else "Очередь пуста")
         if not picks:
             await query.edit_message_text("Очередь пуста — пришлю, как появится новое.")
@@ -851,7 +865,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.mark_sent(user_id, sent)
         logger.info("кнопка «ещё»: пользователю %s отправлено %s", user_id, len(sent))
         await send_more_button(context.bot, query.message.chat_id,
-                               len(pick_for_user(st)))
+                               len(pick_for_user(st)), len(sent), closed)
         return
 
     if data.startswith("hide:"):
