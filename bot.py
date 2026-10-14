@@ -368,22 +368,17 @@ MORE_KEYBOARD = InlineKeyboardMarkup([[
 
 
 async def send_more_button(bot, chat_id, left, sent=0, closed=0):
-    """Под пачкой — что ушло, что отвалилось и сколько осталось.
+    """Под пачкой — сколько актуальных вакансий ещё ждёт.
 
-    Очередь убывает не только на размер порции: по дороге бот выкидывает
-    вакансии, которые успели снять с публикации, и без этой строки разница
-    выглядит случайной.
+    Снятые с публикации в счёт не идут: человеку нужно живое число, а не
+    бухгалтерия бота. closed остаётся в сигнатуре для логов.
     """
-    if not left and not sent:
+    if not left:
         return
-    parts = []
-    if sent:
-        parts.append("отправил " + str(sent))
-    if closed:
-        parts.append("снято с публикации " + str(closed))
-    parts.append("в очереди ещё " + str(left))
-    await bot.send_message(chat_id=chat_id, text=" · ".join(parts).capitalize() + ".",
-                           reply_markup=MORE_KEYBOARD if left else None)
+    await bot.send_message(
+        chat_id=chat_id,
+        text="В очереди ещё " + str(left) + " актуальных вакансий.",
+        reply_markup=MORE_KEYBOARD)
 
 
 async def send_vacancies(bot, chat_id, vacancies):
