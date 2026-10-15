@@ -1311,6 +1311,10 @@ def is_fresh(item, max_age_days=MAX_AGE_DAYS, now=None):
     return age <= max_age_days
 
 
+# Собственные карьерные сайты компаний - у них приоритет над агрегаторами.
+OWN_SITE_SOURCES = {"careers", "magnit", "avito", "2gis", "dodo", "aviasales", "itone"}
+
+
 def merge_duplicates(items):
     """Склеить одну и ту же вакансию, найденную в разных сервисах.
 
@@ -1319,6 +1323,11 @@ def merge_duplicates(items):
     дважды. Теперь такие карточки объединяются, а ссылки на все сервисы,
     где вакансия нашлась, собираются в links.
     """
+    # Сначала карьерные сайты компаний: если вакансия есть и у них, и на
+    # агрегаторе, основной становится карточка с сайта работодателя, а
+    # ссылка на агрегатор просто добавляется второй кнопкой.
+    items = sorted(items, key=lambda v: 0 if v.get("source") in OWN_SITE_SOURCES else 1)
+
     merged, order = {}, []
     for item in items:
         item.setdefault("links", [(item.get("source", ""), item.get("url", ""))])
