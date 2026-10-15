@@ -1366,6 +1366,66 @@ def _augment_formats(item):
     return item
 
 
+# ------------------------------------------------------------- Магнит Tech
+
+# Свой сайт вакансий на Vue, но данные лежат в открытом JSON.
+MAGNIT_API = "https://magnit.tech/api/v1/vacancy"
+
+
+async def fetch_magnit(client):
+    out = []
+    for page in range(1, 6):
+        try:
+            resp = await client.get(MAGNIT_API, params={"page": page, "per_page": 50},
+                                    headers={"User-Agent": UA,
+                                             "Accept": "application/json"})
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("magnit: запрос не удался: %s %s", type(exc).__name__, exc)
+            break
+
+        items = data.get("results") or []
+        for raw in items:
+            vid = str(raw.get("id") or raw.get("foreign_id") or "")
+            title = (raw.get("title") or "").strip()
+            if not vid or not title:
+                continue
+            # Формат работы у них описан фразой: «Москва и Краснодар
+            # (гибрид/офис), другие города - удаленно».
+            where = " ".join(f.get("name") or ""
+                             for f in (raw.get("work_formats") or []))
+            formats = []
+            if re.search(r"удал[ёе]н|remote", where, re.I):
+                formats.append("remote")
+            if re.search(r"гибрид|hybrid", where, re.I):
+                formats.append("hybrid")
+            if re.search(r"офис", where, re.I):
+                formats.append("office")
+            out.append({
+                "uid": "magnit:" + vid,
+                "source": "magnit",
+                "ext_id": vid,
+                "title": title,
+                "company": "Магнит Tech",
+                "area": (raw.get("location") or "").strip(),
+                "url": "https://magnit.tech/vacancy/" + vid,
+                "published_at": None,
+                "salary_from": None,
+                "salary_to": None,
+                "currency": "RUR",
+                "work_format": ",".join(dict.fromkeys(formats)),
+                "experience": "",
+                # Магнит Tech - аккредитованная ИТ-компания, но утверждать
+                # это за них не будем: отметку подтянет общая проверка.
+                "it_accred": "",
+            })
+        if not (data.get("meta") or {}).get("has_more_pages"):
+            break
+    logger.info("magnit: вакансий %s", len(out))
+    return out
+
+
 # ------------------------------------------------------- карьерные сайты IT
 
 # Разделы «вакансии» на сайтах IT-компаний. Разметка у всех своя, поэтому
@@ -1382,6 +1442,10 @@ CAREER_PAGES = [
     ("Яндекс", "https://yandex.ru/jobs/vacancies"),
     ("Контур", "https://kontur.ru/career/vacancies"),
     ("VK", "https://team.vk.company/vacancy/"),
+    # Huntflow - конструктор карьерных страниц, разметка у всех одинаковая
+    ("Flowwow", "https://flowwow.huntflow.io/"),
+    ("Циан", "https://cian.huntflow.io/"),
+    ("YCLIENTS", "https://yclients.huntflow.io/"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
@@ -1534,6 +1598,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
             tasks.append(fetch_2gis(client))
             tasks.append(fetch_avito(client))
             tasks.append(fetch_careers(client))
+            tasks.append(fetch_magnit(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
