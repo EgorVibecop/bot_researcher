@@ -214,6 +214,59 @@ async def fetch_hh(client, query, area=113, period=7, pages=1, remote=False):
     return out
 
 
+# --------------------------------------------------- Работа России (ГосТруд)
+
+# Государственный портал trudvsem.ru с открытым API: почти полмиллиона
+# вакансий, ключ не нужен. Туда обязаны выкладывать вакансии госкомпании и
+# многие крупные работодатели, так что пересечение с hh неполное.
+TRUDVSEM_API = "https://opendata.trudvsem.ru/api/v1/vacancies"
+
+
+async def fetch_trudvsem(client, query, limit=50):
+    try:
+        resp = await client.get(TRUDVSEM_API, params={"text": query, "limit": limit},
+                                headers={"User-Agent": UA, "Accept": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("trudvsem: запрос не удался (%s): %s %s",
+                       query[:30], type(exc).__name__, exc)
+        return []
+
+    out = []
+    for row in (data.get("results") or {}).get("vacancies") or []:
+        raw = row.get("vacancy") or {}
+        vid = str(raw.get("id") or "")
+        title = (raw.get("job-name") or "").strip()
+        if not vid or not title:
+            continue
+        # Формат работы они пишут словами в двух разных полях.
+        where = " ".join(str(raw.get(f) or "")
+                         for f in ("schedule", "workPlaceType", "conditions"))
+        formats = []
+        if re.search(r"дистанцион|удал[её]нн|remote", where, re.I):
+            formats.append("remote")
+        if re.search(r"гибрид", where, re.I):
+            formats.append("hybrid")
+        company = (raw.get("company") or {}).get("name") or ""
+        out.append({
+            "uid": "trudvsem:" + vid,
+            "source": "trudvsem",
+            "ext_id": vid,
+            "title": title,
+            "company": company.strip(),
+            "area": (raw.get("region") or {}).get("name") or "",
+            "url": raw.get("vac_url") or "",
+            "published_at": _to_iso(raw.get("creation-date")),
+            "salary_from": raw.get("salary_min") or None,
+            "salary_to": raw.get("salary_max") or None,
+            "currency": raw.get("currency") or "RUR",
+            "work_format": ",".join(dict.fromkeys(formats)),
+            "experience": "",
+        })
+    return out
+
+
 # ------------------------------------------------------------- rabota.ru
 
 # Крупный агрегатор, не только IT. Вакансии отдаёт разметкой schema.org,
@@ -1618,6 +1671,8 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
                                       pages=HH_PAGES, remote=True))
         if "rabota" in sources:
             tasks += [fetch_rabota(client, q) for q in habr_queries]
+        if "trudvsem" in sources:
+            tasks += [fetch_trudvsem(client, q) for q in habr_queries]
         if "zarplata" in sources:
             for q in hh_queries:
                 tasks.append(fetch_zarplata(client, q, area=area, period=period,

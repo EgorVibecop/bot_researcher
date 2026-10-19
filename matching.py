@@ -325,7 +325,9 @@ TITLE = "Радар вакансий для исследователей"
 DEFAULT_WORK_FORMATS = "remote"
 SETTING_FORMATS = ["remote", "hybrid", "office"]
 TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters",
-               "careerspace", "remote_it_jobs", "it_jobs_rus"]
+               "careerspace", "remote_it_jobs", "it_jobs_rus",
+               # общие по IT и удалёнке - проверено, что читаются
+               "itjobs_ru", "normrabota", "jobs_it_remote"]
 # Маркер IT-аккредитации нужен только аналитику.
 SHOW_IT_ACCRED = False
 EMPLOYER_QUERY = (
