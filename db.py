@@ -297,6 +297,10 @@ def all_users_count():
 
 # --------------------------------------------------------------------- вакансии
 
+# Сайты самих компаний: их ссылка важнее ссылки агрегатора.
+OWN_SITE_SOURCES = {"careers", "magnit", "avito", "2gis", "dodo", "aviasales", "itone"}
+
+
 def upsert_vacancies(items):
     """Записывает вакансии, возвращает список тех, которых раньше не было."""
     conn = get_conn()
@@ -323,14 +327,21 @@ def upsert_vacancies(items):
         # у удалёнки её ещё и размножают по городам - там город игнорируем
         if "remote" in (v.get("work_format") or ""):
             twin = conn.execute(
-                "SELECT 1 FROM vacancies WHERE title = ? AND company = ?"
+                "SELECT uid, source, url FROM vacancies WHERE title = ? AND company = ?"
                 " AND published_at >= ?", (v["title"], v["company"], recent)).fetchone()
         else:
             twin = conn.execute(
-                "SELECT 1 FROM vacancies WHERE title = ? AND company = ? AND area = ?"
-                " AND published_at >= ?",
+                "SELECT uid, source, url FROM vacancies WHERE title = ? AND company = ?"
+                " AND area = ? AND published_at >= ?",
                 (v["title"], v["company"], v["area"], recent)).fetchone()
         if twin:
+            # Дубль не заводим, но если он пришёл с сайта самой компании, а в
+            # базе лежит версия с агрегатора - подменяем ссылку. Человеку
+            # нужен работодатель, а не посредник.
+            if (v.get("source") in OWN_SITE_SOURCES
+                    and twin["source"] not in OWN_SITE_SOURCES):
+                conn.execute("UPDATE vacancies SET source = ?, url = ? WHERE uid = ?",
+                             (v["source"], v["url"], twin["uid"]))
             continue
         conn.execute(
             "INSERT INTO vacancies (uid, source, ext_id, title, company, area, url,"

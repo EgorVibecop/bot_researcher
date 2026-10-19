@@ -1455,6 +1455,9 @@ CAREER_PAGES = [
     ("Flowwow", "https://flowwow.huntflow.io/"),
     ("Циан", "https://cian.huntflow.io/"),
     ("YCLIENTS", "https://yclients.huntflow.io/"),
+    # Открываются только из России - с сервера, не с моей машины
+    ("X5", "https://rabota.x5.ru/vacancies"),
+    ("СДЭК", "https://rabota.cdek.ru/"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
@@ -1525,7 +1528,7 @@ async def fetch_careers(client):
         resp = None
         for attempt in (url, re.sub(r"(https?://[^/]+/).*", r"\1", url)):
             try:
-                got = await client.get(attempt, headers=headers)
+                got = await client.get(attempt, headers=headers, timeout=12)
                 got.raise_for_status()
                 resp = got
                 break
