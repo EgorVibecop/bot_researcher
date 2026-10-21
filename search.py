@@ -64,6 +64,14 @@ HH_PAUSE = 0.7
 # широкие запросы на первой же неделе. 40 - предел самого hh (2000 вакансий
 # на запрос), дальше он всё равно ничего не отдаёт.
 HH_PAGES = int(os.getenv("HH_PAGES", "40"))
+# Глубина обхода остальных площадок: везде останавливаемся на первой
+# неполной странице, так что это лишь предохранитель.
+HABR_PAGES = int(os.getenv("HABR_PAGES", "5"))
+# У Работы.ру разметка с вакансиями есть только на первой странице:
+# вторая отдаётся пустым каркасом, листать её бессмысленно.
+RABOTA_PAGES = int(os.getenv("RABOTA_PAGES", "1"))
+TRUDVSEM_PAGES = int(os.getenv("TRUDVSEM_PAGES", "5"))
+GETMATCH_PAGES = int(os.getenv("GETMATCH_PAGES", "5"))
 
 
 async def _hh_get(client, url, params, headers):
@@ -245,15 +253,30 @@ async def fetch_hh(client, query, area=113, period=7, pages=1, remote=False):
 TRUDVSEM_API = "https://opendata.trudvsem.ru/api/v1/vacancies"
 
 
-async def fetch_trudvsem(client, query, limit=50):
+async def fetch_trudvsem(client, query, limit=100, pages=TRUDVSEM_PAGES):
+    out, seen = [], set()
+    for page in range(pages):
+        got = await _trudvsem_page(client, query, limit, page)
+        fresh = [v for v in got if v["uid"] not in seen]
+        if not fresh:
+            break
+        seen.update(v["uid"] for v in fresh)
+        out.extend(fresh)
+        if len(got) < limit:
+            break
+    return out
+
+
+async def _trudvsem_page(client, query, limit, page):
     try:
-        resp = await client.get(TRUDVSEM_API, params={"text": query, "limit": limit},
+        resp = await client.get(TRUDVSEM_API,
+                                params={"text": query, "limit": limit, "offset": page},
                                 headers={"User-Agent": UA, "Accept": "application/json"})
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
-        logger.warning("trudvsem: запрос не удался (%s): %s %s",
-                       query[:30], type(exc).__name__, exc)
+        logger.warning("trudvsem: запрос не удался (%s, стр. %s): %s %s",
+                       query[:30], page, type(exc).__name__, exc)
         return []
 
     out = []
@@ -294,15 +317,27 @@ async def fetch_trudvsem(client, query, limit=50):
 
 # Крупный агрегатор, не только IT. Вакансии отдаёт разметкой schema.org,
 # поэтому разбираем тем же кодом, что и карьерные сайты.
-async def fetch_rabota(client, query):
+async def fetch_rabota(client, query, pages=RABOTA_PAGES):
+    out, seen = [], set()
+    for page in range(1, pages + 1):
+        fresh = [v for v in await _rabota_page(client, query, page)
+                 if v["uid"] not in seen]
+        if not fresh:
+            break
+        seen.update(v["uid"] for v in fresh)
+        out.extend(fresh)
+    return out
+
+
+async def _rabota_page(client, query, page):
     try:
-        resp = await client.get("https://www.rabota.ru/vacancy",
-                                params={"query": query},
+        resp = await client.get("https://www.rabota.ru/vacancy/",
+                                params={"query": query, "page": page},
                                 headers={"User-Agent": UA})
         resp.raise_for_status()
     except Exception as exc:
-        logger.warning("rabota.ru: запрос не удался (%s): %s %s",
-                       query[:30], type(exc).__name__, exc)
+        logger.warning("rabota.ru: запрос не удался (%s, стр. %s): %s %s",
+                       query[:30], page, type(exc).__name__, exc)
         return []
 
     out = []
@@ -356,12 +391,17 @@ async def fetch_zarplata(client, query, area=113, period=7, pages=1):
                 break
             items = (json.loads(html_mod.unescape(m.group(1)))
                      .get("vacancySearchResult") or {}).get("vacancies") or []
+            parsed = []
             for raw in items:
                 vac = _hh_item(raw)
                 vac["uid"] = "zp:" + vac["ext_id"]
                 vac["source"] = "zarplata"
-                out.append(vac)
+                parsed.append(vac)
+            out.extend(parsed)
             if len(items) < 50:
+                break
+            if parsed and all(_older_than(v.get("published_at"), period)
+                              for v in parsed):
                 break
         except Exception as exc:
             logger.warning("zarplata: запрос не удался (%s): %s", query[:40], exc)
@@ -933,8 +973,23 @@ def _habr_salary(chunk):
     return None, None, ""
 
 
-async def fetch_habr(client, query, remote=False):
-    params = {"q": query, "type": "all", "sort": "date"}
+async def fetch_habr(client, query, remote=False, pages=HABR_PAGES):
+    out, seen = [], set()
+    for page in range(1, pages + 1):
+        got = await _habr_page(client, query, remote, page)
+        # Считать «страница неполная - значит последняя» тут нельзя: на
+        # странице 25 карточек, но часть из них другого вида, и разбор даёт
+        # то 11, то 20. Останавливаемся, когда новых вакансий больше нет.
+        fresh = [v for v in got if v["uid"] not in seen]
+        if not fresh:
+            break
+        seen.update(v["uid"] for v in fresh)
+        out.extend(fresh)
+    return out
+
+
+async def _habr_page(client, query, remote, page):
+    params = {"q": query, "type": "all", "sort": "date", "page": page}
     if remote:
         params["remote"] = "true"
     try:
@@ -945,7 +1000,7 @@ async def fetch_habr(client, query, remote=False):
         )
         resp.raise_for_status()
     except Exception as exc:
-        logger.warning("habr: запрос не удался (%s): %s", query, exc)
+        logger.warning("habr: запрос не удался (%s, стр. %s): %s", query, page, exc)
         return []
 
     out = []
@@ -1127,7 +1182,7 @@ async def _fetch_linkedin_page(client, query, location, period_days, start):
 
 # ----------------------------------------------------------------- getmatch
 
-async def fetch_getmatch(client, limit=100, pages=2):
+async def fetch_getmatch(client, limit=100, pages=GETMATCH_PAGES):
     out = []
     for page in range(pages):
         try:
