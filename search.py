@@ -59,10 +59,11 @@ HH_PAUSE = 0.7
 
 # Сколько страниц выдачи забирать с hh на каждый запрос: страница = 50
 # самых свежих вакансий, одной страницы на широкие запросы не хватало.
-# Три страницы по 50 вакансий - это 150 самых свежих, и по широкому
-# запросу они укладываются в неделю: всё, что старше, бот не видел
-# вовсе. Берём глубже; обход прерывается сам, когда страница неполная.
-HH_PAGES = int(os.getenv("HH_PAGES", "12"))
+# Страницы hh по 50 вакансий. Листаем, пока выдача не кончится или пока
+# вакансии не станут старше окна поиска: фиксированный потолок обрезал
+# широкие запросы на первой же неделе. 40 - предел самого hh (2000 вакансий
+# на запрос), дальше он всё равно ничего не отдаёт.
+HH_PAGES = int(os.getenv("HH_PAGES", "40"))
 
 
 async def _hh_get(client, url, params, headers):
@@ -169,6 +170,19 @@ def _hh_api_item(raw):
     }
 
 
+def _older_than(published_at, days):
+    """Опубликована раньше, чем окно поиска? Без даты считаем, что нет."""
+    if not published_at:
+        return False
+    try:
+        stamp = datetime.fromisoformat(published_at)
+    except Exception:
+        return False
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=MSK)
+    return stamp < datetime.now(MSK) - timedelta(days=days)
+
+
 async def fetch_hh(client, query, area=113, period=7, pages=1, remote=False):
     out = []
     for page in range(pages):
@@ -208,8 +222,14 @@ async def fetch_hh(client, query, area=113, period=7, pages=1, remote=False):
                 break
             result = json.loads(html_mod.unescape(m.group(1)))["vacancySearchResult"]
             items = result.get("vacancies") or []
-            out.extend(_hh_item(i) for i in items)
+            parsed = [_hh_item(i) for i in items]
+            out.extend(parsed)
             if len(items) < 50:
+                break
+            # Выдача отсортирована от свежих к старым: как только страница
+            # целиком ушла за окно поиска, дальше листать незачем.
+            if parsed and all(_older_than(v.get("published_at"), period)
+                              for v in parsed):
                 break
         except Exception as exc:
             logger.warning("hh: запрос не удался (%s): %s", query[:40], exc)
