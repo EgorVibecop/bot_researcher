@@ -363,8 +363,8 @@ async def drop_closed(vacancies):
 
 
 MORE_KEYBOARD = InlineKeyboardMarkup([[
-    InlineKeyboardButton("➕ Ещё 5", callback_data="more:5"),
     InlineKeyboardButton("➕ Ещё 10", callback_data="more:10"),
+    InlineKeyboardButton("📨 Все", callback_data="more:0"),
 ]])
 
 
@@ -852,8 +852,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отдаём следующие N из очереди - те, которых человек ещё не видел.
         count = int(data.split(":", 1)[1])
         st = db.get_settings(user_id)
+        # «Все» - это count 0: столько, сколько есть в очереди. Проверка на
+        # архив идёт запросом на вакансию, поэтому на большой очереди это
+        # занимает минуты - предупреждаем сразу.
+        await query.answer("Собираю…")
+        if not count:
+            waiting = len(pick_for_user(st))
+            if waiting > 30:
+                await context.bot.send_message(
+                    query.message.chat_id,
+                    "Отправляю все " + str(waiting) + " — это займёт несколько минут.")
         picks, closed = await pick_alive(st, count)
-        await query.answer("Собираю…" if picks else "Очередь пуста")
         if not picks:
             await query.edit_message_text("Очередь пуста — пришлю, как появится новое.")
             return
