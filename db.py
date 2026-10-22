@@ -50,6 +50,7 @@ SETTINGS_DEFAULTS = {
     "quiet_start": 23,
     "quiet_end": 8,
     "max_per_run": 5,
+    "only_ru": 1,
     "paused": 0,
 }
 
@@ -91,6 +92,7 @@ def init_db():
             quiet_start INTEGER DEFAULT 23,
             quiet_end INTEGER DEFAULT 8,
             max_per_run INTEGER DEFAULT 5,
+            only_ru INTEGER DEFAULT 1,
             paused INTEGER DEFAULT 0
         );
 
@@ -206,6 +208,7 @@ def _migrate(conn):
         "quiet_start": "INTEGER DEFAULT 23",
         "quiet_end": "INTEGER DEFAULT 8",
         "max_per_run": "INTEGER DEFAULT 5",
+        "only_ru": "INTEGER DEFAULT 1",
         "paused": "INTEGER DEFAULT 0",
     }
     for name, decl in columns.items():
@@ -709,6 +712,10 @@ def matches_user(vac, st, includes, excludes, muted):
     return match_reason(vac, st, includes, excludes, muted) is None
 
 
+# Источники, где попадаются вакансии других стран.
+WORLDWIDE_SOURCES = {"linkedin", "tg"}
+
+
 def work_bucket(formats):
     """Одна вакансия - одна корзина, без дублей в ленте.
 
@@ -767,6 +774,13 @@ def match_reason(vac, st, includes, excludes, muted):
     bucket = work_bucket(formats)
     if wanted_formats and bucket != "unknown" and bucket not in wanted_formats:
         return "формат работы"
+
+    # Зарубежные вакансии приходят только оттуда, где публикуют весь мир:
+    # LinkedIn и телеграм-каналы. Российские площадки проверять незачем -
+    # там и английское название вакансии про российский рынок.
+    if (st.get("only_ru", 1) and vac.get("source") in WORLDWIDE_SOURCES
+            and not matching.looks_russian(vac)):
+        return "не про российский рынок"
 
     region = st.get("region") or "any"
     if region in MSK_CITY and not formats & {"remote", "remote_maybe"}:

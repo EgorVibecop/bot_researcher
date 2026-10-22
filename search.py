@@ -1063,39 +1063,9 @@ LI_PAGES = 3            # выдача отдаёт по 10 вакансий н�
 _li_turn = 0
 
 
-# С LinkedIn приходило много вакансий иностранных компаний, которые на
-# российский рынок не смотрят вовсе. Берём только те, где есть явный
-# российский признак: кириллица, российская локация, рубли или прямая
-# оговорка про российский рынок.
-RU_CITIES = (
-    r"росси|russia|russian\s+federation|\bрф\b|москв|moscow|"
-    r"санкт[-\s]?петербург|saint[-\s]?petersburg|st\.?\s?petersburg|"
-    r"новосибирск|novosibirsk|екатеринбург|ekaterinburg|yekaterinburg|"
-    r"казан|kazan|нижний\s+новгород|nizhny|челябинск|chelyabinsk|"
-    r"самар|samara|омск|omsk|ростов|rostov|уф[аы]|\bufa\b|красноярск|"
-    r"krasnoyarsk|воронеж|voronezh|перм|\bperm\b|волгоград|volgograd|"
-    r"краснодар|krasnodar|сочи|sochi|тюмен|tyumen|иркутск|irkutsk|"
-    r"владивосток|vladivostok|калининград|kaliningrad|тольятти|ижевск|"
-    r"барнаул|ульяновск|ярославл|хабаровск|махачкал|томск|оренбург|"
-    r"кемеров|новокузнецк|рязан|астрахан|пенз|липецк|тула|киров"
-)
-RU_MARKET = (
-    r"russian[-\s]speaking|russian\s+market|русскоязычн|российск|"
-    r"relocation\s+to\s+russia|рублях|\bruble|\brub\b|₽"
-)
-LI_RUSSIAN = re.compile(RU_CITIES + "|" + RU_MARKET, re.IGNORECASE)
-CYRILLIC = re.compile(r"[а-яёА-ЯЁ]")
-
-
-def looks_russian(item):
-    """Есть ли у вакансии признак российского рынка."""
-    where = " ".join(str(item.get(f) or "")
-                     for f in ("title", "company", "area", "currency"))
-    if CYRILLIC.search(where):
-        return True
-    if (item.get("currency") or "").upper() in ("RUR", "RUB"):
-        return True
-    return bool(LI_RUSSIAN.search(where))
+# Признак российского рынка живёт в matching: им пользуется и сбор с
+# LinkedIn, и фильтр пользователя.
+looks_russian = matching.looks_russian
 
 
 def _linkedin_next(queries):

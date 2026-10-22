@@ -76,7 +76,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
 
 REGIONS = {"any": "Вся Россия", "msk": "Москва", "spb": "Санкт-Петербург"}
 SALARY_STEPS = [0, 100000, 150000, 200000, 250000, 300000]
-# Сколько вакансий уходит за одну отправку: переключается в настройках
+# Сколько вакансий уходит за одну отправку: переключается в фильтре
 # 0 - отдавать всё, что подходит, без ограничения порции
 BATCH_STEPS = [5, 10, 25, 0]
 SOURCE_NAMES = {"hh": "hh.ru", "zarplata": "Зарплата.ру", "rabota": "Работа.ру", "trudvsem": "Работа России", "habr": "Хабр Карьера", "getmatch": "getmatch",
@@ -91,7 +91,7 @@ WORK_FORMAT = {"remote": "удалённо", "remote_maybe": "удалёнка �
                "unknown": "формат не указан",
                "hybrid": "гибрид", "office": "офис"}
 WORK_FORMAT_ORDER = ["remote", "remote_maybe", "hybrid", "office", "unknown"]
-# в настройках выбираются только эти три: remote_maybe навешивает сам бот,
+# в фильтре выбираются только эти, remote_maybe навешивает сам бот,
 # когда находит обещание удалёнки в тексте вакансии
 # Список зависит от профиля: аналитику полный офис не нужен вовсе.
 SETTING_FORMATS = matching.SETTING_FORMATS
@@ -469,7 +469,7 @@ WELCOME = (
     # Описание того, что именно бот ищет, зависит от профиля
     + matching.WELCOME_BODY +
     "Проверяю раз в {interval} мин. Каждая вакансия приходит один раз.\n\n"
-    "🧮 Фильтр — формат работы: удалёнка и гибрид.\n"
+    "🧮 Фильтр — формат работы и страна.\n"
     "🔑 Ключевые слова — добавить своё или отсечь лишнее.\n"
 )
 
@@ -528,7 +528,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "<b>Что умею</b>\n\n"
         "🔍 <b>Найти сейчас</b> — внеочередная проверка источников.\n"
-        "🧮 <b>Фильтр</b> — формат работы: удалёнка и гибрид.\n"
+        "🧮 <b>Фильтр</b> — формат работы (удалёнка, гибрид) и страна "
+        "(только Россия или любая).\n"
         "🔑 <b>Ключевые слова</b> — свои слова в дополнение к встроенным и стоп-слова.\n"
         "⏸ <b>Пауза</b> — временно перестать присылать.\n\n"
         "<b>Команды</b>\n"
@@ -650,7 +651,7 @@ async def cmd_why(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(name + ": <b>" + str(count) + "</b>")
     lines.append("")
     lines.append("после ваших настроек: <b>" + str(len(pick_for_user(st))) + "</b>")
-    lines.append("отсеяно настройками: " + queue_reasons(st))
+    lines.append("отсеяно фильтром: " + queue_reasons(st))
     lines.append("")
     lines.append("формат: " + (format_names(st["work_formats"]) or "любой") +
                  " · за раз: " + (str(int(st["max_per_run"])) if st["max_per_run"]
@@ -754,7 +755,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Подходящих вакансий в базе: " + str(s["in_base"]) + "\n"
         "Появилось за сутки: " + str(s["fresh_day"]) + "\n"
         "В очереди именно вам: <b>" + str(len(pick_for_user(st))) + "</b>\n"
-        + "Отсеяно вашими настройками: " + queue_reasons(st) + "\n"
+        + "Отсеяно фильтром: " + queue_reasons(st) + "\n"
         + ("Последняя проверка: " + LAST_CYCLE["at"] + ", собрано " +
            str(LAST_CYCLE["collected"]) + ", из них новых " +
            str(LAST_CYCLE["fresh"]) + "\n" if LAST_CYCLE else
@@ -766,12 +767,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML, reply_markup=MAIN_MENU)
 
 
-# ------------------------------------------------------------- настройки
+# --------------------------------------------------------------- фильтр
 
 def settings_text(st):
     return (
         "🧮 <b>Фильтр</b>\n\n"
         "Формат работы: <b>" + (format_names(st["work_formats"]) or "любой") + "</b>\n"
+        "Страна: <b>" + ("только Россия" if st["only_ru"] else "любая") + "</b>\n"
         "Режим: <b>" + ("дайджест в " + str(st["digest_hour"]) + ":00"
                         if st["mode"] == "digest" else "присылать сразу") + "</b>\n"
         "Тишина: <b>с " + str(st["quiet_start"]) + ":00 до " + str(st["quiet_end"]) + ":00</b>"
@@ -789,6 +791,9 @@ def settings_keyboard(st):
     rows = [[InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
                                   callback_data="wf:" + f)
              for f in SETTING_FORMATS]]
+    rows.append([InlineKeyboardButton(
+        "🇷🇺 только Россия" if st["only_ru"] else "🌍 любая страна",
+        callback_data="s:only_ru:" + str(0 if st["only_ru"] else 1))])
     return InlineKeyboardMarkup(rows)
 
 
