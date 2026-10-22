@@ -1577,6 +1577,69 @@ async def fetch_magnit(client):
     return out
 
 
+# ------------------------------------------- карьерные сайты «на раскрытие»
+
+# Есть сайты, где вакансии - это раскрывающиеся блоки без отдельных адресов
+# (Burger King, Orion soft). Ссылки там ведут на «Откликнуться», а название
+# лежит просто текстом. Поэтому вытаскиваем подписи и оставляем только те,
+# что проходят фильтр профиля; ссылка - на сам раздел вакансий.
+TEXT_CAREERS = [
+    ("Burger King", "https://bktch.ru/vacancies"),
+    ("Orion soft", "https://career.orionsoft.ru/vacancy"),
+]
+TEXT_NODE = re.compile(r">([^<>]{4,120})<")
+
+
+def _visible_lines(text):
+    body = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", " ", text or "",
+                  flags=re.IGNORECASE)
+    out, seen = [], set()
+    for raw in TEXT_NODE.findall(body):
+        line = re.sub(r"\s+", " ", html_mod.unescape(raw)).strip()
+        if line and line.lower() not in seen:
+            seen.add(line.lower())
+            out.append(line)
+    return out
+
+
+async def fetch_text_careers(client):
+    out = []
+    for company, url in TEXT_CAREERS:
+        try:
+            resp = await client.get(url, headers={"User-Agent": UA}, timeout=15)
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.info("careers %s: страница не открылась: %s %s",
+                        company, type(exc).__name__, exc)
+            continue
+
+        found = 0
+        for line in _visible_lines(resp.text):
+            # Отдельных адресов у вакансий нет, поэтому мусор отсечь больше
+            # нечем - сразу спрашиваем фильтр профиля.
+            if not matching.classify(line):
+                continue
+            found += 1
+            vid = hashlib.md5((company + line).encode("utf-8")).hexdigest()[:12]
+            out.append({
+                "uid": "careers:" + vid,
+                "source": "careers",
+                "ext_id": vid,
+                "title": line,
+                "company": company,
+                "area": "",
+                "url": url,
+                "published_at": None,
+                "salary_from": None,
+                "salary_to": None,
+                "currency": "RUR",
+                "work_format": "",
+                "experience": "",
+            })
+        logger.info("careers %s: по теме %s", company, found)
+    return out
+
+
 # ----------------------------------------------------------------- Skyeng
 
 # Ссылки на вакансии у них - короткие адреса в корне сайта
@@ -1805,6 +1868,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
             tasks.append(fetch_careers(client))
             tasks.append(fetch_magnit(client))
             tasks.append(fetch_skyeng(client))
+            tasks.append(fetch_text_careers(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
