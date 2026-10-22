@@ -159,6 +159,23 @@ def init_db():
         DB_PATH, counts["users"], counts["vacancies"], counts["sent"])
 
 
+def _once(conn, name, sql, args=()):
+    """Разовая правка данных: выполняется один раз за всю жизнь базы.
+
+    Раньше такие UPDATE'ы стояли прямо в миграции и прогонялись при каждом
+    запуске - то есть при каждом перезапуске сервиса настройки человека
+    затирались обратно. Теперь имя правки запоминается.
+    """
+    conn.execute("CREATE TABLE IF NOT EXISTS applied (name TEXT PRIMARY KEY,"
+                 " applied_at TEXT)")
+    done = conn.execute("SELECT 1 FROM applied WHERE name = ?", (name,)).fetchone()
+    if done:
+        return
+    conn.execute(sql, args)
+    conn.execute("INSERT OR REPLACE INTO applied (name, applied_at) VALUES (?, ?)",
+                 (name, now().isoformat(timespec="seconds")))
+
+
 def _migrate(conn):
     """Дописывает колонки, появившиеся после первого запуска бота."""
     vac_have = {row["name"] for row in conn.execute("PRAGMA table_info(vacancies)")}
@@ -176,18 +193,21 @@ def _migrate(conn):
     # «все»: 0 значит отдавать всё подходящее сразу.
     # Темп ленты: по пять вакансий в час. «Все разом» было временной мерой,
     # пока разбирались, почему приходит мало.
-    conn.execute("UPDATE users SET max_per_run = 5 WHERE max_per_run IN (0, 8, 15)")
+    _once(conn, "batch-5",
+          "UPDATE users SET max_per_run = 5 WHERE max_per_run IN (0, 8, 15)")
 
     # Фильтры по зарплате, региону и категориям убраны из настроек: они
     # молча резали ленту (порог в 300 тысяч отсекал почти всё). Сбрасываем
     # их у тех, кто успел выставить.
-    conn.execute("UPDATE users SET min_salary = 0, region = 'any',"
-                 " include_no_salary = 1, categories = ?", (DEFAULT_CATEGORIES,))
+    _once(conn, "drop-legacy-filters",
+          "UPDATE users SET min_salary = 0, region = 'any',"
+          " include_no_salary = 1, categories = ?", (DEFAULT_CATEGORIES,))
 
     # Полный офис убран из фильтра: у тех, кто его включал, оставляем
     # удалёнку и гибрид.
-    conn.execute("UPDATE users SET work_formats = 'remote,hybrid'"
-                 " WHERE IFNULL(work_formats, '') <> 'remote,hybrid'")
+    _once(conn, "formats-remote-hybrid",
+          "UPDATE users SET work_formats = 'remote,hybrid'"
+          " WHERE IFNULL(work_formats, '') <> 'remote,hybrid'")
 
     # Цитаты, вырезанные из разметки страницы, нечитаемы: чистим один раз,
     # при следующей проверке описания бот подставит нормальную фразу.
