@@ -182,7 +182,8 @@ TG_CHANNELS = ["analytics_jobs", "data_analyst_jobs", "analyst_job",
                "remote_it_jobs", "it_jobs_rus",
                # добавлены после проверки веб-просмотра
                "datajob", "analytics_vacancy", "analyst_vacancies",
-               "itjobs_ru", "normrabota", "jobs_it_remote"]
+               "itjobs_ru", "normrabota", "jobs_it_remote",
+               "biznes_analitik_vakansii"]
 
 # --- 5. Форматы работы ----------------------------------------------------
 # Полный офис человеку не нужен вовсе: в настройках его нет, а вакансии

@@ -329,8 +329,8 @@ TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters",
                "careerspace", "remote_it_jobs", "it_jobs_rus",
                # общие по IT и удалёнке - проверено, что читаются
                "itjobs_ru", "normrabota", "jobs_it_remote"]
-# Маркер IT-аккредитации нужен только аналитику.
-SHOW_IT_ACCRED = False
+# Маркер IT-аккредитации показываем в обоих профилях.
+SHOW_IT_ACCRED = True
 KEYWORDS_HINT = (
     "UX / CX / Product / Market Research, researcher, ресерч, исследователь, "
     "исследования, социолог, юзабилити, CustDev, глубинные интервью, "

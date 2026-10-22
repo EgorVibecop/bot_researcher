@@ -185,8 +185,7 @@ def _migrate(conn):
     # Полный офис убран из фильтра: у тех, кто его включал, оставляем
     # удалёнку и гибрид.
     conn.execute("UPDATE users SET work_formats = 'remote,hybrid'"
-                 " WHERE work_formats LIKE '%office%'"
-                 " OR IFNULL(work_formats, '') = ''")
+                 " WHERE IFNULL(work_formats, '') <> 'remote,hybrid'")
 
     # Цитаты, вырезанные из разметки страницы, нечитаемы: чистим один раз,
     # при следующей проверке описания бот подставит нормальную фразу.
@@ -710,6 +709,25 @@ def matches_user(vac, st, includes, excludes, muted):
     return match_reason(vac, st, includes, excludes, muted) is None
 
 
+def work_bucket(formats):
+    """Одна вакансия - одна корзина, без дублей в ленте.
+
+    Есть удалёнка (хоть вместе с офисом и гибридом) - это «удалёнка».
+    Нет удалёнки, но есть гибрид - «гибрид». Только офис - «офис».
+    Источник промолчал - «unknown», такие показываем всем, иначе пропадёт
+    весь LinkedIn, карьерные сайты и телеграм.
+    """
+    if not formats:
+        return "unknown"
+    if formats & {"remote", "remote_maybe"}:
+        return "remote"
+    if "hybrid" in formats:
+        return "hybrid"
+    if "office" in formats:
+        return "office"
+    return "unknown"
+
+
 def match_reason(vac, st, includes, excludes, muted):
     """None, если вакансия подходит, иначе короткая причина отказа.
 
@@ -741,21 +759,13 @@ def match_reason(vac, st, includes, excludes, muted):
 
     # Пустой формат - это не офис, а «источник его не сообщил» (так приходит
     # весь LinkedIn). Разводим эти случаи, чтобы не выдавать догадку за факт.
-    formats = set(f for f in (vac.get("work_format") or "").split(",") if f) or {"unknown"}
+    formats = set(f for f in (vac.get("work_format") or "").split(",") if f)
     area = (vac.get("area") or "").lower()
 
     wanted_formats = set(
         f for f in (st.get("work_formats") or DEFAULT_WORK_FORMATS).split(",") if f)
-    # «удалёнка по договорённости» (в шапке гибрид, в описании обещают
-    # удалёнку) засчитывается тому, кто просил удалёнку
-    if "remote" in wanted_formats:
-        wanted_formats.add("remote_maybe")
-    # «Формат не указан» засчитываем тому, кто готов на офис. А если офиса
-    # в профиле нет вовсе (у аналитика), засчитываем всем: иначе весь
-    # LinkedIn, карьерные сайты и телеграм молча пропадают из ленты.
-    if "office" in wanted_formats or "office" not in matching.SETTING_FORMATS:
-        wanted_formats.add("unknown")
-    if wanted_formats and not formats & wanted_formats:
+    bucket = work_bucket(formats)
+    if wanted_formats and bucket != "unknown" and bucket not in wanted_formats:
         return "формат работы"
 
     region = st.get("region") or "any"
