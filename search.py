@@ -1607,6 +1607,52 @@ async def fetch_magnit(client):
     return out
 
 
+# ----------------------------------------------------------------- Skyeng
+
+# Ссылки на вакансии у них - короткие адреса в корне сайта
+# (/analitik-dannih), под общий разбор карьерных страниц не подходят.
+SKYENG_URL = "https://vacancies.skyeng.ru/"
+SKYENG_LINK = re.compile(r'<a[^>]+href="(/[a-z0-9-]{5,90})"[^>]*>(.*?)</a>', re.S)
+# В подписи карточки после названия идёт отдел: «Менеджер по продажам
+# Продажи». Отрезаем его, иначе отдел попадает в название и ломает фильтр.
+SKYENG_DEPT = re.compile(
+    r"\s+(?:Продажи|Маркетинг|Клиентский сервис|Разработка|Продукт|Аналитика|"
+    r"Финансы|Преподавание|Дизайн|HR|Операции|Юристы).*$")
+
+
+async def fetch_skyeng(client):
+    try:
+        resp = await client.get(SKYENG_URL, headers={"User-Agent": UA}, timeout=15)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.info("skyeng: страница не открылась: %s %s", type(exc).__name__, exc)
+        return []
+
+    out, seen = [], set()
+    for href, inner in SKYENG_LINK.findall(resp.text):
+        title = SKYENG_DEPT.sub("", _strip_tags(inner)).strip()
+        if not (4 < len(title) < 90) or href in seen:
+            continue
+        seen.add(href)
+        out.append({
+            "uid": "skyeng:" + href.strip("/"),
+            "source": "careers",
+            "ext_id": href.strip("/"),
+            "title": title,
+            "company": "Skyeng",
+            "area": "",
+            "url": SKYENG_URL.rstrip("/") + href,
+            "published_at": None,
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "RUR",
+            "work_format": "",
+            "experience": "",
+        })
+    logger.info("skyeng: карточек %s", len(out))
+    return out
+
+
 # ------------------------------------------------------- карьерные сайты IT
 
 # Разделы «вакансии» на сайтах IT-компаний. Разметка у всех своя, поэтому
@@ -1788,6 +1834,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
             tasks.append(fetch_avito(client))
             tasks.append(fetch_careers(client))
             tasks.append(fetch_magnit(client))
+            tasks.append(fetch_skyeng(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
