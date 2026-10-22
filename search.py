@@ -1630,6 +1630,9 @@ CAREER_PAGES = [
     # Открываются только из России - с сервера, не с моей машины
     ("X5", "https://rabota.x5.ru/vacancies"),
     ("СДЭК", "https://rabota.cdek.ru/"),
+    ("Hoff", "https://job.hoff.ru/"),
+    ("Золотое Яблоко", "https://job.goldapple.ru/"),
+    ("Циан", "https://www.cian.ru/vacancies/"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)

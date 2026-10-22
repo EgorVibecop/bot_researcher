@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 MAIN_MENU = ReplyKeyboardMarkup(
     [
         ["🔍 Найти сейчас", "📊 Статистика"],
-        ["⚙️ Настройки", "🔑 Ключевые слова"],
+        ["🧮 Фильтр", "🔑 Ключевые слова"],
         ["⏸ Пауза", "❓ Помощь"],
     ],
     resize_keyboard=True,
@@ -469,7 +469,7 @@ WELCOME = (
     # Описание того, что именно бот ищет, зависит от профиля
     + matching.WELCOME_BODY +
     "Проверяю раз в {interval} мин. Каждая вакансия приходит один раз.\n\n"
-    "⚙️ Настройки — формат работы, регион, минимальная зарплата, категории.\n"
+    "🧮 Фильтр — формат работы: удалёнка и гибрид.\n"
     "🔑 Ключевые слова — добавить своё или отсечь лишнее.\n"
 )
 
@@ -528,9 +528,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "<b>Что умею</b>\n\n"
         "🔍 <b>Найти сейчас</b> — внеочередная проверка источников.\n"
-        "⚙️ <b>Настройки</b> — регион, только удалёнка, минимальная зарплата, "
-        "категории (UX / CX / Product / Marketing / соц. исследования), источники, "
-        "режим (сразу или дайджест утром).\n"
+        "🧮 <b>Фильтр</b> — формат работы: удалёнка и гибрид.\n"
         "🔑 <b>Ключевые слова</b> — свои слова в дополнение к встроенным и стоп-слова.\n"
         "⏸ <b>Пауза</b> — временно перестать присылать.\n\n"
         "<b>Команды</b>\n"
@@ -771,13 +769,9 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------------------------------------------------- настройки
 
 def settings_text(st):
-    srcs = db.active_sources(st)
     return (
-        "⚙️ <b>Настройки</b>\n\n"
+        "🧮 <b>Фильтр</b>\n\n"
         "Формат работы: <b>" + (format_names(st["work_formats"]) or "любой") + "</b>\n"
-        "За одну отправку: <b>" + (str(int(st["max_per_run"])) + " шт."
-                                   if st["max_per_run"] else "все") + "</b>\n"
-        "Источники: <b>" + ", ".join(SOURCE_NAMES.get(s, s) for s in srcs) + "</b>\n"
         "Режим: <b>" + ("дайджест в " + str(st["digest_hour"]) + ":00"
                         if st["mode"] == "digest" else "присылать сразу") + "</b>\n"
         "Тишина: <b>с " + str(st["quiet_start"]) + ":00 до " + str(st["quiet_end"]) + ":00</b>"
@@ -795,20 +789,6 @@ def settings_keyboard(st):
     rows = [[InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
                                   callback_data="wf:" + f)
              for f in SETTING_FORMATS]]
-    rows.append([InlineKeyboardButton(
-        "📦 за раз: " + (str(int(st["max_per_run"])) + " шт."
-                        if st["max_per_run"] else "все"),
-        callback_data="s:max_per_run:next")])
-
-    rows.append([InlineKeyboardButton(mark(s in srcs) + SOURCE_NAMES[s],
-                                      callback_data="src:" + s)
-                 for s in ["hh", "habr", "getmatch"]])
-    rows.append([
-        InlineKeyboardButton(("🔘 " if st["mode"] == "instant" else "") + "сразу",
-                             callback_data="s:mode:instant"),
-        InlineKeyboardButton(("🔘 " if st["mode"] == "digest" else "") + "дайджест утром",
-                             callback_data="s:mode:digest"),
-    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -825,10 +805,7 @@ async def cmd_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     muted = db.get_muted(user_id)
     await update.message.reply_text(
         "🔑 <b>Ключевые слова</b>\n\n"
-        "Встроенный список уже ловит: UX / CX / Product / Market Research, "
-        "researcher, ресерч, исследователь, исследования, социолог, юзабилити, "
-        "CustDev, глубинные интервью, фокус-группы, исследователь пользовательского "
-        "и клиентского опыта.\n\n"
+        "Встроенный список уже ловит: " + matching.KEYWORDS_HINT + ".\n\n"
         "➕ Свои слова: <b>" + (", ".join(includes) or "нет") + "</b>\n"
         "🚫 Стоп-слова: <b>" + (", ".join(excludes) or "нет") + "</b>\n"
         "🏢 Скрытые компании: <b>" + (", ".join(muted) or "нет") + "</b>",
@@ -984,7 +961,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_find(update, context)
     elif text == "📊 Статистика":
         await cmd_stats(update, context)
-    elif text == "⚙️ Настройки":
+    elif text in ("🧮 Фильтр", "⚙️ Настройки"):
         await cmd_settings(update, context)
     elif text == "🔑 Ключевые слова":
         await cmd_keywords(update, context)
@@ -1033,7 +1010,7 @@ async def _post_init(app: Application):
         ("start", "запустить радар"),
         ("find", "проверить прямо сейчас"),
         ("search", "разовый поиск по hh.ru"),
-        ("settings", "настройки"),
+        ("settings", "фильтр: формат работы"),
         ("keywords", "ключевые слова"),
         ("stats", "статистика"),
         ("pause", "пауза"),

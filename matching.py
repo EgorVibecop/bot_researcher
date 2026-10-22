@@ -322,14 +322,21 @@ HABR_QUERIES = [
 PROFILE = os.getenv("PROFILE", "researcher").strip().lower()
 
 TITLE = "Радар вакансий для исследователей"
-DEFAULT_WORK_FORMATS = "remote"
-SETTING_FORMATS = ["remote", "hybrid", "office"]
+DEFAULT_WORK_FORMATS = "remote,hybrid"
+# Полный офис убран: выбор только из удалёнки и гибрида.
+SETTING_FORMATS = ["remote", "hybrid"]
 TG_CHANNELS = ["ux_jobs", "product_jobs", "it_hunters",
                "careerspace", "remote_it_jobs", "it_jobs_rus",
                # общие по IT и удалёнке - проверено, что читаются
                "itjobs_ru", "normrabota", "jobs_it_remote"]
 # Маркер IT-аккредитации нужен только аналитику.
 SHOW_IT_ACCRED = False
+KEYWORDS_HINT = (
+    "UX / CX / Product / Market Research, researcher, ресерч, исследователь, "
+    "исследования, социолог, юзабилити, CustDev, глубинные интервью, "
+    "фокус-группы, исследователь пользовательского опыта, исследователь "
+    "клиентского опыта"
+)
 EMPLOYER_QUERY = (
     "исследователь OR исследователи OR исследованиям OR исследований OR "
     "researcher OR research OR ресерчер OR ресёрч OR ресерч OR "
@@ -337,9 +344,10 @@ EMPLOYER_QUERY = (
 )
 WELCOME_BODY = (
     "Слежу за hh.ru, Хабр Карьерой, getmatch, LinkedIn, сайтами компаний и тг-каналами:\n"
-    "UX / CX / Product / Market Research, исследователь опыта, социолог, CustDev.\n\n"
+    "UX / CX / Product / Market Research, исследователь пользовательского "
+    "опыта, исследователь клиентского опыта, социолог, CustDev.\n\n"
     "Ищу строго по названию вакансии, аналитику данных и продажи отсекаю.\n"
-    "По умолчанию присылаю <b>только удалёнку</b> — офис и гибрид включаются в настройках.\n\n"
+    "Формат: <b>удалёнка и гибрид</b>, переключается в фильтре.\n\n"
 )
 
 LINKEDIN_QUERIES = HABR_QUERIES
@@ -368,3 +376,4 @@ if PROFILE == "analyst":
     WELCOME_BODY = _p.WELCOME_BODY
     EMPLOYER_QUERY = _p.EMPLOYER_QUERY
     SHOW_IT_ACCRED = True
+    KEYWORDS_HINT = _p.KEYWORDS_HINT

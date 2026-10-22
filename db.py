@@ -182,6 +182,12 @@ def _migrate(conn):
     conn.execute("UPDATE users SET min_salary = 0, region = 'any',"
                  " include_no_salary = 1, categories = ?", (DEFAULT_CATEGORIES,))
 
+    # Полный офис убран из фильтра: у тех, кто его включал, оставляем
+    # удалёнку и гибрид.
+    conn.execute("UPDATE users SET work_formats = 'remote,hybrid'"
+                 " WHERE work_formats LIKE '%office%'"
+                 " OR IFNULL(work_formats, '') = ''")
+
     # Цитаты, вырезанные из разметки страницы, нечитаемы: чистим один раз,
     # при следующей проверке описания бот подставит нормальную фразу.
     conn.execute("UPDATE vacancies SET remote_note = NULL, remote_checked = 0"
