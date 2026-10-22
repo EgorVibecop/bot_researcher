@@ -698,6 +698,38 @@ def funnel(user_id, days):
     return out
 
 
+def global_stats(days):
+    """Сводка по боту целиком: люди, база, отправки, источники."""
+    since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
+    day = (now() - timedelta(days=1)).isoformat(timespec="seconds")
+    week = (now() - timedelta(days=7)).isoformat(timespec="seconds")
+    conn = get_conn()
+    one = lambda sql, args=(): conn.execute(sql, args).fetchone()["c"]
+    out = {
+        "users": one("SELECT COUNT(*) c FROM users"),
+        "active": one("SELECT COUNT(*) c FROM users WHERE IFNULL(paused, 0) = 0"),
+        "alive_week": one("SELECT COUNT(*) c FROM users WHERE last_seen >= ?", (week,)),
+        "vacancies": one("SELECT COUNT(*) c FROM vacancies"),
+        "relevant": one("SELECT COUNT(*) c FROM vacancies WHERE relevant = 1"),
+        "in_window": one("SELECT COUNT(*) c FROM vacancies WHERE relevant = 1"
+                         " AND IFNULL(published_at, first_seen) >= ?"
+                         " AND IFNULL(closed, 0) = 0", (since,)),
+        "fresh_day": one("SELECT COUNT(*) c FROM vacancies WHERE relevant = 1"
+                         " AND first_seen >= ?", (day,)),
+        "closed": one("SELECT COUNT(*) c FROM vacancies WHERE IFNULL(closed, 0) = 1"),
+        "sent_total": one("SELECT COUNT(*) c FROM sent"),
+        "sent_week": one("SELECT COUNT(*) c FROM sent WHERE sent_at >= ?", (week,)),
+        "accredited": one("SELECT COUNT(*) c FROM vacancies WHERE it_accred = 'yes'"),
+    }
+    out["by_source"] = [
+        (row["source"], row["c"]) for row in conn.execute(
+            "SELECT source, COUNT(*) c FROM vacancies WHERE relevant = 1"
+            " AND IFNULL(published_at, first_seen) >= ? GROUP BY source"
+            " ORDER BY c DESC", (since,))]
+    conn.close()
+    return out
+
+
 def user_stats(user_id):
     conn = get_conn()
     week = (now() - timedelta(days=7)).isoformat(timespec="seconds")

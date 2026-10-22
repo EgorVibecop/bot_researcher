@@ -986,13 +986,35 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not ADMIN_ID or str(update.effective_user.id) != str(ADMIN_ID):
+        await update.message.reply_text(
+            "Команда только для админа.\n\nТвой Telegram id: <code>" +
+            str(update.effective_user.id) + "</code>", parse_mode=ParseMode.HTML)
         return
-    total, active = db.all_users_count()
-    s = db.user_stats(update.effective_user.id)
+
+    g = db.global_stats(SEARCH_PERIOD_DAYS)
+    sources = ", ".join(SOURCE_NAMES.get(name, name) + ": " + str(count)
+                        for name, count in g["by_source"]) or "—"
+    cycle = ("собрано " + str(LAST_CYCLE["collected"]) + ", новых " +
+             str(LAST_CYCLE["fresh"]) + " в " + LAST_CYCLE["at"]
+             if LAST_CYCLE else "ещё не было")
     await update.message.reply_text(
-        "👤 Пользователей: " + str(total) + " (активных " + str(active) + ")\n"
-        "📥 Вакансий в базе: " + str(s["in_base"]) + ", за сутки: " + str(s["fresh_day"]) + "\n"
-        "⏱ Интервал проверки: " + str(CHECK_INTERVAL_MINUTES) + " мин")
+        "📊 <b>" + matching.TITLE + "</b>\n\n"
+        "👤 Пользователей: <b>" + str(g["users"]) + "</b>"
+        " · активных " + str(g["active"]) + " · заходили за неделю " +
+        str(g["alive_week"]) + "\n"
+        "📥 В базе: <b>" + str(g["vacancies"]) + "</b>"
+        " · по теме " + str(g["relevant"]) +
+        " · в окне " + str(g["in_window"]) +
+        " · за сутки " + str(g["fresh_day"]) + "\n"
+        "🗃 Снято с публикации: " + str(g["closed"]) + "\n"
+        "🏛 С IT-аккредитацией: " + str(g["accredited"]) + "\n"
+        "📨 Отправлено: всего " + str(g["sent_total"]) +
+        " · за неделю " + str(g["sent_week"]) + "\n\n"
+        "<b>Источники (по теме, за окно)</b>\n" + sources + "\n\n"
+        "🔄 Последняя проверка: " + cycle + "\n"
+        "⏱ Интервал: " + str(CHECK_INTERVAL_MINUTES) + " мин · окно " +
+        str(SEARCH_PERIOD_DAYS) + " дн.",
+        parse_mode=ParseMode.HTML)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
