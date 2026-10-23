@@ -24,6 +24,8 @@ import html as html_mod
 import logging
 import os
 import re
+
+import matching
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -82,12 +84,24 @@ def _work_format(text):
 
 
 def _title(text):
-    """Название вакансии — первая содержательная строка поста."""
+    """Название вакансии из поста.
+
+    Раньше брали просто первую содержательную строку, но в части каналов
+    первой строкой идёт компания («МегаФон», «ИТ-Холдинг Т1»), а должность
+    ниже. Поэтому среди первых строк ищем ту, которую фильтр профиля
+    признаёт вакансией, и только если такой нет - берём первую.
+    """
+    lines = []
     for line in text.splitlines():
         line = _LEADING_JUNK.sub("", _HASHTAG.sub("", line)).strip()
         if len(line) >= 4:
-            return line[:120]
-    return ""
+            lines.append(line[:120])
+        if len(lines) >= 8:
+            break
+    for line in lines:
+        if matching.classify(line):
+            return line
+    return lines[0] if lines else ""
 
 
 def _int(text):

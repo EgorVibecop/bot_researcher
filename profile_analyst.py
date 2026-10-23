@@ -188,7 +188,7 @@ TG_CHANNELS = ["analytics_jobs", "data_analyst_jobs", "analyst_job",
                "biznes_analitik_vakansii",
                # проверено, что веб-просмотр открыт
                "nodatanojobs", "offersanalysis", "job_for_analysts",
-               "job_analyst_datascience"]
+               "job_analyst_datascience", "analitiki_rabota"]
 
 # --- 5. Форматы работы ----------------------------------------------------
 # Полный офис человеку не нужен вовсе: в настройках его нет, а вакансии
