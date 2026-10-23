@@ -26,6 +26,8 @@ CORE = [
     r"аналитик", r"\banalyst\b", r"\banalytics\b", r"аналитик\w*",
     r"дата[-\s]?аналит", r"data\s*analy", r"\bbi\b", r"бизнес[-\s]?интеллект",
     r"инженер\w*\s+данных", r"data\s+engineer", r"аналитика\s+данных",
+    # «Специалист по анализу данных» - тот же аналитик, просто иначе назван
+    r"анализ\w*\s+данных", r"data\s*analysis",
 ]
 
 # --- 2. Стоп-слова --------------------------------------------------------
@@ -183,7 +185,10 @@ TG_CHANNELS = ["analytics_jobs", "data_analyst_jobs", "analyst_job",
                # добавлены после проверки веб-просмотра
                "datajob", "analytics_vacancy", "analyst_vacancies",
                "itjobs_ru", "normrabota", "jobs_it_remote",
-               "biznes_analitik_vakansii"]
+               "biznes_analitik_vakansii",
+               # проверено, что веб-просмотр открыт
+               "nodatanojobs", "offersanalysis", "job_for_analysts",
+               "job_analyst_datascience"]
 
 # --- 5. Форматы работы ----------------------------------------------------
 # Полный офис человеку не нужен вовсе: в настройках его нет, а вакансии

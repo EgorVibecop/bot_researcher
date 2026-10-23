@@ -1712,6 +1712,7 @@ CAREER_PAGES = [
     ("Hoff", "https://job.hoff.ru/"),
     ("Золотое Яблоко", "https://job.goldapple.ru/"),
     ("Циан", "https://www.cian.ru/vacancies/"),
+    ("Лемана ПРО", "https://rabota.lemanapro.ru/vacancies"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
@@ -1755,7 +1756,11 @@ def _page_links(text, base):
 
     out, seen = [], set()
     for href, inner in CAREER_LINK.findall(text):
-        title = _strip_tags(inner)
+        # Внутри карточки название обычно в заголовке, а рядом - зарплата,
+        # город, опыт и график. Берём заголовок, если он есть.
+        head = CARD_HEADING.search(inner)
+        title = _strip_tags(head.group(1) if head else inner)
+        title = CARD_TAIL.sub("", title).strip(" ,·|-")
         if not (5 < len(title) < 90) or title.lower() in _CAREER_NOISE:
             continue
         url = urljoin(base, href)
@@ -1764,6 +1769,17 @@ def _page_links(text, base):
         seen.add(url)
         out.append({"title": title, "url": url, "area": "", "published_at": None})
     return out
+
+
+CARD_HEADING = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.S | re.IGNORECASE)
+# Хвост карточки: зарплата, город, опыт, график - всё, что идёт после
+# названия одной строкой.
+CARD_TAIL = re.compile(
+    r"\s\d[\d\s\u00a0\u202f]*(?:₽|руб|rub).*$"
+    r"|\s(?:от|до)\s\d[\d\s\u00a0\u202f]*.*$"
+    r"|\s*з/п\s.*$"
+    r"|\s*зарплата\s.*$",
+    re.IGNORECASE | re.S)
 
 
 _CAREER_NOISE = {"вакансии", "все вакансии", "стажировки", "карьера", "подробнее",
