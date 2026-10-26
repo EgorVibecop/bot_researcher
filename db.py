@@ -205,6 +205,11 @@ def _migrate(conn):
 
     # Полный офис убран из фильтра: у тех, кто его включал, оставляем
     # удалёнку и гибрид.
+    # Из-за ошибки в проверке архива живые вакансии hh помечались снятыми:
+    # в коде их страницы всегда есть слова «вакансия закрыта». Снимаем
+    # пометку - перед отправкой каждую проверим заново.
+    _once(conn, "reset-false-closed",
+          "UPDATE vacancies SET closed = 0 WHERE IFNULL(closed, 0) = 1")
     _once(conn, "formats-remote-hybrid",
           "UPDATE users SET work_formats = 'remote,hybrid'"
           " WHERE IFNULL(work_formats, '') <> 'remote,hybrid'")
