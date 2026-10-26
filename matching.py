@@ -67,7 +67,7 @@ STOP_PATTERNS = _c([
     r"химик", r"хими\w*[-\s]?(технолог|аналитик)", r"биолог", r"микробиолог",
     r"геолог", r"геофизи", r"геодез", r"нефт", r"буров", r"скважин",
     r"агроном", r"селекц", r"зоотехн", r"ветеринар",
-    r"клиническ", r"доклиническ", r"clinical", r"фармац", r"провизор", r"медицинск",
+    r"клиническ", r"доклиническ", r"clinical", r"провизор",
     r"долголети", r"исследован\w*\s+стабильност", r"биоэконом",
     r"reverse\s*engineer", r"research\s+engineer", r"computer\s+vision",
     r"радиолог", r"рентген", r"\bврач\b", r"фельдшер",
@@ -223,6 +223,20 @@ ROLE_MARKERS = _c([
 ])
 
 
+# Фарма и медицина сами по себе не повод отказать: «Менеджер по
+# маркетинговым исследованиям фармацевтического рынка» - наш человек, а
+# «Медицинский представитель» или «Исследователь в лаборатории» - нет.
+# Поэтому отрасль отсекаем только там, где нет рыночного контекста.
+INDUSTRY_ONLY = _c([
+    r"фармац", r"медицинск", r"врач", r"провизор", r"лаборант",
+])
+MARKET_CONTEXT = _c([
+    r"маркетингов", r"\bрынк", r"\bрынок\b", r"потребител", r"социолог",
+    r"опрос", r"\bux\b", r"\bcx\b", r"юзабилити", r"custdev", r"кастдев",
+    r"продуктов\w+\s+исследован", r"\bresearch\b", r"ресерч", r"ресёрч",
+])
+
+
 def classify(title):
     """Возвращает список категорий или None, если вакансия не подходит."""
     texts = variants(title)
@@ -230,6 +244,8 @@ def classify(title):
     if not _hits(RESEARCH_CORE, texts) and not domain_role:
         return None
     if _hits(STOP_PATTERNS, texts):
+        return None
+    if _hits(INDUSTRY_ONLY, texts) and not _hits(MARKET_CONTEXT, texts):
         return None
     if _hits(SOFT_STOP_PATTERNS, [main_part(t) for t in texts]):
         return None
