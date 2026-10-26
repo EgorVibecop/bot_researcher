@@ -1646,6 +1646,62 @@ async def fetch_text_careers(client):
     return out
 
 
+# --------------------------------------------------------------- МТС Линк
+
+# Сайт вакансий на Tilda, но список подтягивается из их же открытого JSON
+# (он отдаётся с основного домена, на job.* тот же адрес возвращает 404).
+MTSLINK_API = "https://mts-link.ru/api/huntflow/vacancies"
+MTSLINK_PAGE = "https://job.mts-link.ru/vacancies/"
+
+
+async def fetch_mtslink(client):
+    try:
+        resp = await client.get(
+            MTSLINK_API, timeout=15,
+            headers={"User-Agent": UA, "Accept": "application/json",
+                     "Referer": MTSLINK_PAGE})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.info("mts-link: не ответил: %s %s", type(exc).__name__, exc)
+        return []
+
+    rows = data if isinstance(data, list) else (data.get("items") or data.get("data") or [])
+    out = []
+    for raw in rows:
+        vid = str(raw.get("id") or "")
+        title = (raw.get("position") or "").strip()
+        if not vid or not title or raw.get("hidden"):
+            continue
+        if (raw.get("state") or "OPEN").upper() != "OPEN":
+            continue
+        where = str(raw.get("workFormat") or "")
+        formats = []
+        if re.search(r"удал[ёе]нн|remote", where, re.I):
+            formats.append("remote")
+        if re.search(r"гибрид", where, re.I):
+            formats.append("hybrid")
+        if re.search(r"офис", where, re.I):
+            formats.append("office")
+        out.append({
+            "uid": "mtslink:" + vid,
+            "source": "careers",
+            "ext_id": vid,
+            "title": title,
+            "company": "МТС Линк",
+            "area": (raw.get("accountDivision") or "").strip(),
+            "url": MTSLINK_PAGE,
+            "published_at": None,
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "RUR",
+            "work_format": ",".join(dict.fromkeys(formats)),
+            "experience": str(raw.get("workExperience") or "").strip(),
+        })
+    logger.info("mts-link: вакансий %s", len(out))
+    return out
+
+
 # ----------------------------------------------------------------- Skyeng
 
 # Ссылки на вакансии у них - короткие адреса в корне сайта
@@ -1891,6 +1947,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
             tasks.append(fetch_magnit(client))
             tasks.append(fetch_skyeng(client))
             tasks.append(fetch_text_careers(client))
+            tasks.append(fetch_mtslink(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
