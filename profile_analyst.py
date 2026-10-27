@@ -102,6 +102,7 @@ STRONG = [
     # и «ML-разработчик» выпадали как просто «разработчики»
     r"\betl\b", r"\bdwh\b", r"data\s*engineer", r"инженер\w*\s+данных",
     r"data\s*scien", r"\bml\b", r"machine\s*learning", r"\bnlp\b",
+    r"дашборд", r"power\s*bi", r"tableau", r"datalens", r"отч[ёе]тност",
 ]
 
 # --- 3. Категории ---------------------------------------------------------
