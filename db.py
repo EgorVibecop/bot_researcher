@@ -27,7 +27,7 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Категории и формат работы зависят от профиля: у исследователя одни,
 # у аналитика другие (и офиса в списке нет вовсе).
-DEFAULT_CATEGORIES = ",".join(matching.ALL_CATEGORY_IDS)
+DEFAULT_CATEGORIES = ",".join(matching.DEFAULT_CATEGORIES)
 DEFAULT_SOURCES = ("hh,zarplata,rabota,trudvsem,habr,getmatch,geekjob,itone,superjob,"
                    "tg,linkedin,companies")
 
@@ -210,6 +210,10 @@ def _migrate(conn):
     # пометку - перед отправкой каждую проверим заново.
     _once(conn, "reset-false-closed",
           "UPDATE vacancies SET closed = 0 WHERE IFNULL(closed, 0) = 1")
+    # Направления переехали в фильтр: у всех включаем набор по умолчанию,
+    # остальное человек добирает сам.
+    _once(conn, "directions-2026-10", "UPDATE users SET categories = ?",
+          (DEFAULT_CATEGORIES,))
     _once(conn, "formats-remote-hybrid",
           "UPDATE users SET work_formats = 'remote,hybrid'"
           " WHERE IFNULL(work_formats, '') <> 'remote,hybrid'")

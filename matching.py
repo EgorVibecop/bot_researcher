@@ -176,13 +176,13 @@ CATEGORIES = {
         r"service\s*design", r"сервисн\w+\s+дизайн",
         r"\bnps\b", r"путь\s+клиента",
     ])),
-    "product": ("🔵", "Product", _c([
+    "product": ("🔵", "Продукт", _c([
         r"product\s*(research|insight|analyst)",
         r"продуктов\w+\s+(исследоват|ресерч|аналит)",
         r"\bcustdev\b", r"cust\s*dev", r"кастдев",
         r"discovery", r"дискавери",
     ])),
-    "marketing": ("🟡", "Marketing", _c([
+    "marketing": ("🟡", "Маркетинг", _c([
         r"market(ing)?\s*research", r"\bmr\b",
         r"(consumer|customer|market|marketing|brand)[\s&,]+[\w\s&]{0,20}insight",
         r"маркетингов\w+\s+исследован", r"исследован\w*\s+рынка",
@@ -190,7 +190,7 @@ CATEGORIES = {
         r"потребительск\w+\s+(исследован|инсайт)",
         r"маркетолог[-\s]?(аналитик|исследоват)",
     ])),
-    "socio": ("🟢", "Соц. исследования", _c([
+    "socio": ("🟢", "Социология", _c([
         r"социолог", r"sociolog",
         r"социологическ\w+\s+исследован",
         r"общественн\w+\s+мнени", r"полев\w+\s+исследован",
@@ -199,9 +199,10 @@ CATEGORIES = {
 }
 
 # Категория по умолчанию для всего, что прошло ядро, но не попало ни в одну группу
-GENERIC = ("⚪", "Исследования")
+GENERIC = ("⚪", "Другое")
 
 ALL_CATEGORY_IDS = list(CATEGORIES.keys()) + ["research"]
+DEFAULT_CATEGORIES = list(ALL_CATEGORY_IDS)
 
 
 def category_label(cid):
@@ -309,9 +310,13 @@ def classify(title):
         return None
     if _hits(FIELD_ROLE_PATTERNS, texts) and not _hits(STRONG_RESEARCH, texts):
         return None
-    cats = [cid for cid, (_e, _l, pats) in CATEGORIES.items()
-            if _hits(pats, texts)]
-    return cats or ["research"]
+    # Направление ровно одно: берём первое подошедшее сверху вниз, от
+    # узкого к широкому. Иначе «Senior Data Analyst (маркетинговая
+    # аналитика)» попал бы в несколько и пришёл бы дважды.
+    for cid, (_e, _l, pats) in CATEGORIES.items():
+        if _hits(pats, texts):
+            return [cid]
+    return ["research"]
 
 
 def match(title, extra_include=(), extra_exclude=()):
@@ -475,6 +480,7 @@ if PROFILE == "analyst":
                   for cid, (emoji, label, pats) in _p.CATEGORIES.items()}
     GENERIC = _p.GENERIC
     ALL_CATEGORY_IDS = list(CATEGORIES.keys()) + ["research"]
+    DEFAULT_CATEGORIES = _p.DEFAULT_CATEGORIES
     DOMAIN_MARKERS = _c(_p.DOMAIN)
     ROLE_MARKERS = _c(_p.ROLE)
     HH_QUERIES = _p.HH_QUERIES

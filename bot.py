@@ -770,30 +770,46 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --------------------------------------------------------------- фильтр
 
 def settings_text(st):
+    cats = [c for c in (st["categories"] or "").split(",") if c]
+    names = ", ".join(matching.category_label(c)[1] for c in cats) or "ничего"
     return (
         "🧮 <b>Фильтр</b>\n\n"
-        "Формат работы: <b>" + (format_names(st["work_formats"]) or "любой") + "</b>\n"
-        "Страна: <b>" + ("только Россия" if st["only_ru"] else "любая") + "</b>\n"
-        "Режим: <b>" + ("дайджест в " + str(st["digest_hour"]) + ":00"
-                        if st["mode"] == "digest" else "присылать сразу") + "</b>\n"
-        "Тишина: <b>с " + str(st["quiet_start"]) + ":00 до " + str(st["quiet_end"]) + ":00</b>"
+        "🌍 География: <b>" + ("только Россия" if st["only_ru"] else "любая страна") + "</b>\n"
+        "🏠 Формат: <b>" + (format_names(st["work_formats"]) or "любой") + "</b>\n"
+        "🧭 Направления: <b>" + names + "</b>\n\n"
+        "Присылаю раз в " + str(CHECK_INTERVAL_MINUTES) + " мин, тишина с " +
+        str(st["quiet_start"]) + ":00 до " + str(st["quiet_end"]) + ":00."
     )
 
 
 def settings_keyboard(st):
-    cats = set(c for c in (st["categories"] or "").split(",") if c)
-    srcs = set(db.active_sources(st))
     mark = lambda on: "✅ " if on else "▫️ "
-
-    # Фильтры, кроме формата работы, убраны намеренно: зарплата, регион и
-    # категории резали ленту молча, а человеку нужны все подходящие вакансии.
     formats = set(f for f in (st["work_formats"] or "").split(",") if f)
-    rows = [[InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
-                                  callback_data="wf:" + f)
-             for f in SETTING_FORMATS]]
+    cats = set(c for c in (st["categories"] or "").split(",") if c)
+
+    # Группа 1: география
+    rows = [[InlineKeyboardButton(
+        ("🔘 " if st["only_ru"] else "") + "🇷🇺 Россия", callback_data="s:only_ru:1"),
+        InlineKeyboardButton(
+        ("🔘 " if not st["only_ru"] else "") + "🌍 Весь мир", callback_data="s:only_ru:0")]]
+
+    # Группа 2: формат работы
+    rows.append([InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
+                                      callback_data="wf:" + f)
+                 for f in SETTING_FORMATS])
+
+    # Группа 3: направления, по два в ряд
+    buttons = []
+    for cid in matching.ALL_CATEGORY_IDS:
+        emoji, label = matching.category_label(cid)
+        buttons.append(InlineKeyboardButton(mark(cid in cats) + emoji + " " + label,
+                                            callback_data="cat:" + cid))
+    rows += [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
     rows.append([InlineKeyboardButton(
-        "🇷🇺 только Россия" if st["only_ru"] else "🌍 любая страна",
-        callback_data="s:only_ru:" + str(0 if st["only_ru"] else 1))])
+        "📦 за раз: " + (str(int(st["max_per_run"])) + " шт."
+                        if st["max_per_run"] else "все"),
+        callback_data="s:max_per_run:next")])
     return InlineKeyboardMarkup(rows)
 
 
