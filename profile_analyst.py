@@ -137,6 +137,10 @@ CATEGORIES = {
         r"разработчик[-\s]?аналитик", r"analyst\s*developer",
         r"bi[-\s]?разработчик", r"bi\s*developer", r"дата[-\s]?платформ",
         r"инженер\w*\s+(?:по\s+)?(?:данным|dwh|etl)",
+        # Инженер остаётся инженером, даже если работает в аналитике:
+        # «Product Engineer (Python) в команду аналитики» - сюда.
+        r"\bengineer\b", r"\bинженер\b", r"инженер[-\s]аналитик",
+        r"аналитик[-\s]инженер",
     ]),
     "bi": ("🟣", "BI", [
         r"\bbi\b", r"power\s*bi", r"tableau", r"qlik", r"superset",
