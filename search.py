@@ -1768,6 +1768,7 @@ CAREER_PAGES = [
     ("Flowwow", "https://flowwow.huntflow.io/"),
     ("Циан", "https://cian.huntflow.io/"),
     ("YCLIENTS", "https://yclients.huntflow.io/"),
+    ("Tripster", "https://tripster.huntflow.io/"),
     # Открываются только из России - с сервера, не с моей машины
     ("X5", "https://rabota.x5.ru/vacancies"),
     ("СДЭК", "https://rabota.cdek.ru/"),
