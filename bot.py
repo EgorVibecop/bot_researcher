@@ -787,18 +787,25 @@ def settings_keyboard(st):
     formats = set(f for f in (st["work_formats"] or "").split(",") if f)
     cats = set(c for c in (st["categories"] or "").split(",") if c)
 
+    # Подписи групп: отдельной строкой, нажатие ничего не делает - телеграм
+    # заголовков в клавиатуре не умеет, а без них кнопки сливаются в кучу.
+    def header(text):
+        return [InlineKeyboardButton("— " + text + " —", callback_data="noop")]
+
     # Группа 1: география
-    rows = [[InlineKeyboardButton(
+    rows = [header("ГЕОГРАФИЯ"), [InlineKeyboardButton(
         ("🔘 " if st["only_ru"] else "") + "🇷🇺 Россия", callback_data="s:only_ru:1"),
         InlineKeyboardButton(
         ("🔘 " if not st["only_ru"] else "") + "🌍 Весь мир", callback_data="s:only_ru:0")]]
 
     # Группа 2: формат работы
+    rows.append(header("ФОРМАТ"))
     rows.append([InlineKeyboardButton(mark(f in formats) + WORK_FORMAT[f],
                                       callback_data="wf:" + f)
                  for f in SETTING_FORMATS])
 
     # Группа 3: направления, по два в ряд
+    rows.append(header("НАПРАВЛЕНИЯ"))
     buttons = []
     for cid in matching.ALL_CATEGORY_IDS:
         emoji, label = matching.category_label(cid)
@@ -806,6 +813,7 @@ def settings_keyboard(st):
                                             callback_data="cat:" + cid))
     rows += [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
 
+    rows.append(header("СКОЛЬКО ПРИСЫЛАТЬ"))
     rows.append([InlineKeyboardButton(
         "📦 за раз: " + (str(int(st["max_per_run"])) + " шт."
                         if st["max_per_run"] else "все"),
@@ -845,6 +853,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data or ""
     db.ensure_user(user_id, query.message.chat_id, query.from_user.username or "")
+
+    if data == "noop":
+        await query.answer()
+        return
 
     if data.startswith("more:"):
         # Отдаём следующие N из очереди - те, которых человек ещё не видел.
