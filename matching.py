@@ -214,6 +214,10 @@ def category_label(cid):
 # Мягкие стоп-слова: отсекают, только если стоят в основной части названия.
 # В уточнении они называют предмет исследования, а не роль — «Менеджер по
 # исследованиям (Brand & Sales Lift)» это ресёрч, а не продажи.
+# У исследователя ролей-исключений нет: дизайнер остаётся дизайнером.
+ROLE_OVERRIDE_PATTERNS = _c([])
+MAIN_STOP_PATTERNS = _c([])
+
 SOFT_STOP_PATTERNS = _c([
     r"продаж", r"\bsales\b", r"account\s+manager",
     # «Продуктовый дизайнер / Design Lead (UX/UI-исследования)» - вакансия
@@ -309,7 +313,13 @@ def classify(title):
         return None
     if _hits(INDUSTRY_ONLY, texts) and not _hits(MARKET_CONTEXT, texts):
         return None
-    if _hits(SOFT_STOP_PATTERNS, [main_part(t) for t in texts]):
+    main = [main_part(t) for t in texts]
+    # Эти роли не отменяются ничем: стажировка есть стажировка.
+    if _hits(MAIN_STOP_PATTERNS, main):
+        return None
+    # Мягкие стоп-слова отменяются, если в основной части названия есть
+    # понятная роль: «Бизнес-аналитик по закупкам» - это бизнес-аналитик.
+    if _hits(SOFT_STOP_PATTERNS, main) and not _hits(ROLE_OVERRIDE_PATTERNS, main):
         return None
     if _hits(FIELD_ROLE_PATTERNS, texts) and not _hits(STRONG_RESEARCH, texts):
         return None
@@ -477,6 +487,8 @@ if PROFILE == "analyst":
     RESEARCH_CORE = _c(_p.CORE)
     STOP_PATTERNS = _c(_p.STOP)
     SOFT_STOP_PATTERNS = _c(_p.SOFT_STOP)
+    ROLE_OVERRIDE_PATTERNS = _c(_p.ROLE_OVERRIDE)
+    MAIN_STOP_PATTERNS = _c(_p.MAIN_STOP)
     FIELD_ROLE_PATTERNS = _c(_p.FIELD_ROLES)
     STRONG_RESEARCH = _c(_p.STRONG)
     CATEGORIES = {cid: (emoji, label, _c(pats))
