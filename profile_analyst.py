@@ -266,7 +266,10 @@ TG_CHANNELS = ["analytics_jobs", "data_analyst_jobs", "analyst_job",
                "biznes_analitik_vakansii",
                # проверено, что веб-просмотр открыт
                "nodatanojobs", "offersanalysis", "job_for_analysts",
-               "job_analyst_datascience", "analitiki_rabota"]
+               "job_analyst_datascience", "analitiki_rabota",
+               # сеть каналов @best_itjob: сам канал - прайс на рекламу,
+               # вакансии лежат в профильных каналах сети
+               "best_ITjob", "de_rabota", "ai_rabota"]
 
 # --- 5. Форматы работы ----------------------------------------------------
 # Полный офис человеку не нужен вовсе: в настройках его нет, а вакансии
