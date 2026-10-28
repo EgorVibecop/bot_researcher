@@ -1788,7 +1788,6 @@ CAREER_PAGES = [
     ("X5", "https://rabota.x5.ru/vacancies"),
     ("Hoff", "https://job.hoff.ru/"),
     ("Золотое Яблоко", "https://job.goldapple.ru/"),
-    ("Циан", "https://www.cian.ru/vacancies/"),
     ("Лемана ПРО", "https://rabota.lemanapro.ru/vacancies"),
 ]
 
