@@ -1592,6 +1592,8 @@ async def fetch_magnit(client):
 TEXT_CAREERS = [
     ("Burger King", "https://bktch.ru/vacancies"),
     ("Orion soft", "https://career.orionsoft.ru/vacancy"),
+    ("Монетка", "https://career.monetka.ru/it/"),
+    ("Ясно", "https://work.yasno.live/"),
 ]
 TEXT_NODE = re.compile(r">([^<>]{4,120})<")
 
@@ -1612,7 +1614,8 @@ async def fetch_text_careers(client):
     out = []
     for company, url in TEXT_CAREERS:
         try:
-            resp = await client.get(url, headers={"User-Agent": UA}, timeout=15)
+            # Монетка и подобные тяжёлые страницы отвечают медленно
+            resp = await client.get(url, headers={"User-Agent": UA}, timeout=25)
             resp.raise_for_status()
         except Exception as exc:
             logger.info("careers %s: страница не открылась: %s %s",
