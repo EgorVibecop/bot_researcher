@@ -1092,6 +1092,10 @@ _SITE_ALIASES = {
     "МТС Линк": "mts-link",
     "Магнит Tech": "magnit",
     "Skyeng": "skyeng",
+    "Авито": "avito",
+    "2ГИС": "2gis",
+    "Dodo Brands": "dodo",
+    "Aviasales": "aviasales",
 }
 _FAILED = re.compile(r"не откры|не ответил|не удал")
 
@@ -1117,7 +1121,9 @@ async def career_report():
             got = await asyncio.gather(
                 search.fetch_careers(client), search.fetch_text_careers(client),
                 search.fetch_magnit(client), search.fetch_skyeng(client),
-                search.fetch_mtslink(client), return_exceptions=True)
+                search.fetch_mtslink(client), search.fetch_avito(client),
+                search.fetch_2gis(client), search.fetch_dodo(client),
+                search.fetch_aviasales(client), return_exceptions=True)
     finally:
         search.logger.removeHandler(catcher)
 
@@ -1129,7 +1135,9 @@ async def career_report():
     for name in ([c for c, _ in search.CAREER_PAGES]
                  + [c for c, _ in search.CAREER_SEARCH]
                  + [c for c, _ in search.TEXT_CAREERS]
-                 + ["Магнит Tech", "Skyeng", "МТС Линк"]):
+                 # у этих компаний свои сборщики, а не общий разбор страницы
+                 + ["Магнит Tech", "Skyeng", "МТС Линк", "Авито", "2ГИС",
+                    "Dodo Brands", "Aviasales"]):
         if name not in expected:
             expected.append(name)
 
