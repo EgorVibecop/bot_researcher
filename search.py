@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -1774,11 +1775,19 @@ CAREER_PAGES = [
     ("Tripster", "https://tripster.huntflow.io/"),
     # Открываются только из России - с сервера, не с моей машины
     ("X5", "https://rabota.x5.ru/vacancies"),
-    ("СДЭК", "https://rabota.cdek.ru/"),
     ("Hoff", "https://job.hoff.ru/"),
     ("Золотое Яблоко", "https://job.goldapple.ru/"),
     ("Циан", "https://www.cian.ru/vacancies/"),
     ("Лемана ПРО", "https://rabota.lemanapro.ru/vacancies"),
+]
+
+# Сайты, у которых в списке видно только первую страницу найма, зато
+# работает поиск: без него аналитики и исследователи там не находились.
+CAREER_SEARCH = [
+    ("VK", "https://team.vk.company/vacancy/?search={q}"),
+    ("Яндекс", "https://yandex.ru/jobs/vacancies?text={q}"),
+    # Корень СДЭКа - лендинг без карточек, список отдаётся только поиском.
+    ("СДЭК", "https://rabota.cdek.ru/vacancies?query={q}"),
 ]
 
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
@@ -1856,7 +1865,11 @@ _CAREER_NOISE = {"вакансии", "все вакансии", "стажиро�
 async def fetch_careers(client):
     """Обходит карьерные разделы IT-компаний."""
     out = []
-    for company, url in CAREER_PAGES:
+    pages = list(CAREER_PAGES)
+    for company, template in CAREER_SEARCH:
+        for query in matching.CAREER_QUERIES:
+            pages.append((company, template.format(q=quote(query))))
+    for company, url in pages:
         # Часть сайтов отдаёт 403/404 на прямой адрес раздела, но открывает
         # корень; ещё часть просит обычные браузерные заголовки.
         headers = {"User-Agent": UA, "Accept-Language": "ru-RU,ru;q=0.9",

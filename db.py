@@ -214,6 +214,11 @@ def _migrate(conn):
     # остальное человек добирает сам.
     _once(conn, "directions-2026-10", "UPDATE users SET categories = ?",
           (DEFAULT_CATEGORIES,))
+    # В первый раз набор по умолчанию был уже, чем просил пользователь:
+    # системные аналитики, инженеры, science и 1С оказались выключены у
+    # всех, и их вакансии не доезжали никуда. Выдаём правильный набор.
+    _once(conn, "directions-2026-10b", "UPDATE users SET categories = ?",
+          (DEFAULT_CATEGORIES,))
     _once(conn, "formats-remote-hybrid",
           "UPDATE users SET work_formats = 'remote,hybrid'"
           " WHERE IFNULL(work_formats, '') <> 'remote,hybrid'")

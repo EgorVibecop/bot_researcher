@@ -179,7 +179,11 @@ CATEGORIES = {
 }
 
 # Направления, включённые по умолчанию: остальное человек добирает сам.
-DEFAULT_CATEGORIES = ["data", "bi", "product", "research"]
+# Выключены по умолчанию только финансы и бизнес-аналитика - так просил
+# пользователь. Остальные направления включены, иначе системные аналитики,
+# инженеры и 1С не доезжают ни до кого, кто не залез в фильтр.
+DEFAULT_CATEGORIES = [c for c in list(CATEGORIES) + ["research"]
+                      if c not in ("finance", "business")]
 
 GENERIC = ("⚪", "Другое")
 
@@ -240,6 +244,8 @@ HABR_QUERIES = [
     "инженер данных",
     "data scientist",
 ]
+
+CAREER_QUERIES = ["аналитик", "analyst", "данных"]
 
 LINKEDIN_QUERIES = [
     "Data Analyst",

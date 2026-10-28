@@ -35,6 +35,16 @@ CYRILLIC_BACK = str.maketrans({lat: cyr for cyr, lat in
                                ((chr(k), v) for k, v in HOMOGLYPHS.items())})
 
 
+# Вакансии приходят с типографскими тире и неразрывными пробелами:
+# «Аналитик‑разработчик» с U+2011 мимо шаблонов с обычным дефисом.
+TYPOGRAPHY = str.maketrans({
+    "‐": "-", "‑": "-", "‒": "-", "–": "-",
+    "—": "-", "―": "-", "−": "-", "­": "-",
+    " ": " ", " ": " ", " ": " ", "​": "",
+    "ё": "е", "Ё": "Е",
+})
+
+
 def variants(text):
     """Название как есть плюс варианты с заменой букв-двойников.
 
@@ -42,7 +52,7 @@ def variants(text):
     и «Cистемный аналитик» латинской C - оба случая встречаются в реальных
     вакансиях, и оба ломают поиск по словам.
     """
-    text = text or ""
+    text = (text or "").translate(TYPOGRAPHY)
     out = [text]
     for swapped in (text.translate(HOMOGLYPHS), text.translate(CYRILLIC_BACK)):
         if swapped not in out:
@@ -405,6 +415,10 @@ HABR_QUERIES = [
     "продуктовый исследователь",
 ]
 
+# Чем спрашивать карьерные сайты: у VK и Яндекса обычный список отдаёт
+# только первую страницу найма вообще, а по поиску сразу приходят наши.
+CAREER_QUERIES = ["исследователь", "researcher"]
+
 # --- Профили -------------------------------------------------------------
 # Один и тот же код обслуживает двух ботов: радар для исследователей и радар
 # для аналитиков. Логика отбора общая, различаются только слова и запросы.
@@ -500,6 +514,7 @@ if PROFILE == "analyst":
     ROLE_MARKERS = _c(_p.ROLE)
     HH_QUERIES = _p.HH_QUERIES
     HABR_QUERIES = _p.HABR_QUERIES
+    CAREER_QUERIES = getattr(_p, "CAREER_QUERIES", CAREER_QUERIES)
     LINKEDIN_QUERIES = _p.LINKEDIN_QUERIES
     TG_CHANNELS = _p.TG_CHANNELS
     DEFAULT_WORK_FORMATS = _p.DEFAULT_WORK_FORMATS
