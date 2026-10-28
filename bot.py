@@ -21,6 +21,7 @@ import asyncio
 from collections import Counter
 import logging
 import os
+import re
 import sys
 import time
 
@@ -280,15 +281,42 @@ def user_filters(user_id):
     )
 
 
+def code_stamp():
+    """Когда правили код бота - по этой строке видно, доехал ли деплой."""
+    import pathlib
+    from datetime import datetime
+    folder = pathlib.Path(__file__).parent
+    newest = max(f.stat().st_mtime for f in folder.glob("*.py"))
+    return datetime.fromtimestamp(newest).strftime("%d.%m %H:%M")
+
+
 def queue_reasons(st):
-    """Почему свежие вакансии не попали в очередь — по пунктам."""
+    """Почему свежие вакансии не попали в очередь — по пунктам.
+
+    Раньше тут стоял потолок в 3000 строк, и сумма причин всегда упиралась
+    ровно в него: по такой сводке нельзя было понять, где теряется.
+    Выключенные направления показываем по именам - сразу видно, что именно
+    человек отключил в фильтре.
+    """
     includes, excludes, muted = user_filters(st["user_id"])
-    counts = Counter()
-    for vac in db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS, limit=3000):
+    counts, off = Counter(), Counter()
+    for vac in db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS):
         reason = db.match_reason(vac, st, includes, excludes, muted)
-        if reason:
-            counts[reason] += 1
-    return ", ".join(name + " " + str(n) for name, n in counts.most_common()) or "ничего"
+        if not reason:
+            continue
+        counts[reason] += 1
+        if reason == "выключенная категория":
+            for cid in (vac.get("categories") or "").split(","):
+                if cid:
+                    off[matching.category_label(cid)[1]] += 1
+    parts = []
+    for name, n in counts.most_common():
+        if name == "выключенная категория" and off:
+            detail = ", ".join(lab + " " + str(k) for lab, k in off.most_common())
+            parts.append(name + " " + str(n) + " (" + detail + ")")
+        else:
+            parts.append(name + " " + str(n))
+    return ", ".join(parts) or "ничего"
 
 
 def pick_for_user(st, limit=None):
@@ -297,7 +325,10 @@ def pick_for_user(st, limit=None):
     # никогда не доедет до человека
     pending = db.unsent_for_user(st["user_id"], days=SEARCH_PERIOD_DAYS)
     picked = [v for v in pending if db.matches_user(v, st, includes, excludes, muted)]
-    # Очередь отсортирована от свежих к старым.
+    # Вакансии с карьерных сайтов компаний уходят первыми: их мало, а ценность
+    # выше - это первоисточник, без посредников. Внутри групп порядок прежний,
+    # от свежих к старым.
+    picked.sort(key=lambda v: 0 if v.get("source") in search.OWN_SITE_SOURCES else 1)
     if limit:
         picked = picked[:limit]
     return picked
@@ -535,6 +566,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Команды</b>\n"
         "/search текст — разовый поиск по hh.ru (например: /search service design)\n"
         "/reset — снова показать вакансии, которые уже приходили\n"
+        "/sites — проверить карьерные сайты компаний прямо сейчас\n"
         "/stats — статистика\n\n"
         "Кнопка «🚫 Скрыть вакансию» убирает карточку из ленты — больше она не придёт.",
         parse_mode=ParseMode.HTML, reply_markup=MAIN_MENU,
@@ -748,6 +780,9 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     by_source = ", ".join(
         SOURCE_NAMES.get(name, name) + ": " + str(count) for name, count in s["by_source"]
     ) or "—"
+    # Поимённо: по общей цифре «карьерные сайты» не видно, какой сайт молчит.
+    by_company = ", ".join(
+        name + " " + str(count) for name, count in s["by_company"][:15]) or "—"
     await update.message.reply_text(
         "📊 <b>Статистика</b>\n\n"
         "Отправлено за неделю: <b>" + str(s["sent_week"]) + "</b>\n"
@@ -760,7 +795,9 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
            str(LAST_CYCLE["collected"]) + ", из них новых " +
            str(LAST_CYCLE["fresh"]) + "\n" if LAST_CYCLE else
            "Последняя проверка: ещё не было\n")
-        + "По источникам: " + by_source + "\n\n"
+        + "По источникам: " + by_source + "\n"
+        + "С сайтов компаний: " + by_company + "\n"
+        + "Код от " + code_stamp() + "\n\n"
         "Режим: " + ("дайджест в " + str(st["digest_hour"]) + ":00"
                      if st["mode"] == "digest" else "присылать сразу") + "\n"
         "Статус: " + ("на паузе ⏸" if st["paused"] else "работает ▶️"),
@@ -1012,6 +1049,93 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Разовый поиск: /search текст запроса", reply_markup=MAIN_MENU)
 
 
+class _LogCatcher(logging.Handler):
+    """Складывает строки лога сбора, чтобы ответить ими в телеграм."""
+
+    def __init__(self):
+        super().__init__(level=logging.INFO)
+        self.lines = []
+
+    def emit(self, record):
+        try:
+            self.lines.append(record.getMessage())
+        except Exception:
+            pass
+
+
+# В логе своих сборщиков компания названа по имени модуля, а не так, как
+# она подписана в карточке: без этой таблицы «Магнит» и «МТС Линк» выглядели
+# бы как «открылся, но пусто», хотя они просто не ответили.
+_SITE_ALIASES = {
+    "МТС Линк": "mts-link",
+    "Магнит Tech": "magnit",
+    "Skyeng": "skyeng",
+}
+_FAILED = re.compile(r"не откры|не ответил|не удал")
+
+
+def _site_failed(name, lines):
+    needle = _SITE_ALIASES.get(name, name).lower()
+    return any(needle in msg.lower() and _FAILED.search(msg) for msg in lines)
+
+
+async def career_report():
+    """Обходит карьерные сайты прямо сейчас и возвращает отчёт, кто что отдал.
+
+    Нужен, чтобы не гадать по логам хостинга: часть сайтов открывается
+    только из России, часть отдаёт пустой каркас на JS, и единственный
+    честный ответ - сходить на них с сервера и показать результат.
+    """
+    import httpx
+
+    catcher = _LogCatcher()
+    search.logger.addHandler(catcher)
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            got = await asyncio.gather(
+                search.fetch_careers(client), search.fetch_text_careers(client),
+                search.fetch_magnit(client), search.fetch_skyeng(client),
+                search.fetch_mtslink(client), return_exceptions=True)
+    finally:
+        search.logger.removeHandler(catcher)
+
+    items = [v for res in got if isinstance(res, list) for v in res]
+    cards = Counter(v["company"] for v in items)
+    topical = Counter(v["company"] for v in items if matching.classify(v["title"]))
+
+    expected = []
+    for name in ([c for c, _ in search.CAREER_PAGES]
+                 + [c for c, _ in search.CAREER_SEARCH]
+                 + [c for c, _ in search.TEXT_CAREERS]
+                 + ["Магнит Tech", "Skyeng", "МТС Линк"]):
+        if name not in expected:
+            expected.append(name)
+
+    lines = []
+    for name in expected:
+        if cards.get(name):
+            mark = "✅" if topical.get(name) else "➖"
+            lines.append(mark + " " + name + " — карточек " + str(cards[name])
+                         + ", по теме " + str(topical.get(name, 0)))
+        elif _site_failed(name, catcher.lines):
+            lines.append("❌ " + name + " — не открылся с сервера")
+        else:
+            lines.append("⚠️ " + name + " — открылся, но карточек не нашлось")
+
+    broken = [m for m in catcher.lines if _FAILED.search(m)][:6]
+    text = ("🏢 <b>Карьерные сайты</b>\n\n" + escape("\n".join(lines))
+            + "\n\nВсего карточек " + str(len(items)) + ", по теме "
+            + str(sum(topical.values())))
+    if broken:
+        text += "\n\n<b>Ошибки</b>\n<code>" + escape("\n".join(broken)[:900]) + "</code>"
+    return text[:4000]
+
+
+async def cmd_sites(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Иду по карьерным сайтам, это займёт минуту…")
+    await update.message.reply_text(await career_report(), parse_mode=ParseMode.HTML)
+
+
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not ADMIN_ID or str(update.effective_user.id) != str(ADMIN_ID):
         await update.message.reply_text(
@@ -1114,6 +1238,7 @@ def main():
     app.add_handler(CommandHandler("resetall", cmd_resetall))
     app.add_handler(CommandHandler("why", cmd_why))
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("sites", cmd_sites))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 

@@ -768,7 +768,28 @@ def user_stats(user_id):
         "in_base": in_base,
         "fresh_day": fresh_day,
         "by_source": [(r["source"], r["c"]) for r in by_source],
+        "by_company": own_site_companies(conn),
     }
+
+
+def own_site_companies(conn=None, days=21):
+    """Сколько вакансий по теме дал каждый карьерный сайт.
+
+    Нужно, чтобы на вопрос «а карьерные сайты вообще смотрятся» отвечать
+    списком компаний, а не общим числом: часть сайтов закрыта блокировками,
+    и по общей цифре этого не видно.
+    """
+    close = conn is None
+    conn = conn or get_conn()
+    since = (now() - timedelta(days=days)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT company, COUNT(*) c FROM vacancies"
+        " WHERE relevant = 1 AND source IN ('careers','magnit','skyeng','mtslink')"
+        " AND IFNULL(published_at, first_seen) >= ?"
+        " GROUP BY company ORDER BY c DESC", (since,)).fetchall()
+    if close:
+        conn.close()
+    return [(r["company"], r["c"]) for r in rows]
 
 
 # ------------------------------------------------------------------- фильтры
