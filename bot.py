@@ -731,6 +731,8 @@ async def cmd_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0]
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+    # Второе слово - что искать на странице. По умолчанию ищем вакансии.
+    needle = context.args[1] if len(context.args) > 1 else "ваканс"
     try:
         import httpx
         async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
@@ -744,19 +746,39 @@ async def cmd_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import re as _re
     links = list(dict.fromkeys(_re.findall(
         r'href="([^"]*(?:vacanc|ваканс|job|career)[^"]*)"', text)))[:8]
-    apis = list(dict.fromkeys(_re.findall(
-        r'https?://[\w.-]*api[\w.-]*/[\w/-]+', text)))[:5]
+    # И абсолютные адреса, и внутренние пути: у приложений на Next.js список
+    # вакансий тянется с /api/..., и без этих путей парсер не написать.
+    apis = list(dict.fromkeys(
+        _re.findall(r'https?://[\w.-]*api[\w.-]*/[\w/-]+', text)
+        + _re.findall(r'"(/api/[\w/-]{3,60})"', text)))[:8]
+    scripts = list(dict.fromkeys(_re.findall(r'<script[^>]+src="([^"]+)"', text)))[:6]
+    # Куски страницы вокруг искомого слова: по ним видно, за что цепляться
+    spots = []
+    for m in list(_re.finditer(_re.escape(needle), text, _re.I))[:3]:
+        chunk = _re.sub(r"\s+", " ", text[max(0, m.start() - 170):m.start() + 230])
+        spots.append(chunk)
     lines = [
         "🔎 " + escape(str(resp.url))[:120],
         "Код: " + str(resp.status_code) + " · размер: " + str(len(text)) + " байт",
         "Слово «вакансия» в тексте: " + str(len(_re.findall(r"ваканс|vacanc", text, _re.I))),
         "JS-оболочка: " + ("похоже на то" if ("__NUXT__" in text or "__NEXT_DATA__" in text
                                               or len(text) < 4000) else "нет, HTML на месте"),
+        "Движок: " + (", ".join(
+            name for name, mark in (("Next.js", "/_next/"), ("Nuxt", "__NUXT__"),
+                                    ("Angular", "ng-version"), ("Vue", "data-v-"),
+                                    ("Huntflow", "huntflow"))
+            if mark in text) or "не опознал"),
+        "Слово «" + escape(needle) + "»: " + str(len(_re.findall(_re.escape(needle), text, _re.I))),
     ]
     if links:
         lines.append("\nСсылки:\n" + escape("\n".join(links)))
     if apis:
         lines.append("\nAPI в коде страницы:\n" + escape("\n".join(apis)))
+    if scripts:
+        lines.append("\nСкрипты:\n" + escape("\n".join(scripts)))
+    if spots:
+        lines.append("\nВокруг слова «" + escape(needle) + "»:\n<code>"
+                     + escape("\n---\n".join(spots))[:1500] + "</code>")
 
     # Кусок разметки вокруг первой вакансии: по нему видно, за что цепляться
     # парсеру. Без этого сайт, закрытый для нас блокировками, не разобрать.
