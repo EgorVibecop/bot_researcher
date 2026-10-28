@@ -761,6 +761,7 @@ def user_stats(user_id):
     by_source = conn.execute(
         "SELECT source, COUNT(*) c FROM vacancies WHERE relevant = 1"
         " GROUP BY source ORDER BY c DESC").fetchall()
+    by_company = own_site_companies(conn)
     conn.close()
     return {
         "sent_week": sent_week,
@@ -768,7 +769,7 @@ def user_stats(user_id):
         "in_base": in_base,
         "fresh_day": fresh_day,
         "by_source": [(r["source"], r["c"]) for r in by_source],
-        "by_company": own_site_companies(conn),
+        "by_company": by_company,
     }
 
 

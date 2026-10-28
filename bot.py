@@ -1181,6 +1181,17 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
                        type(err).__name__)
         return
     logger.error("не смог обработать обновление", exc_info=err)
+    # Молча падать нельзя: со стороны человека это выглядит как «бот умер»,
+    # хотя сломалась одна команда, а рассылка идёт дальше.
+    chat = getattr(getattr(update, "effective_chat", None), "id", None)
+    if chat:
+        try:
+            await context.bot.send_message(
+                chat_id=chat,
+                text="Команда сломалась: " + type(err).__name__ +
+                     ". Рассылка при этом работает, починю.")
+        except Exception:
+            logger.warning("не смог сообщить об ошибке в чат %s", chat)
 
 
 async def _post_init(app: Application):
@@ -1196,6 +1207,7 @@ async def _post_init(app: Application):
         ("resume", "продолжить"),
         ("reset", "прислать всё подходящее заново"),
         ("whoami", "мой Telegram id"),
+        ("sites", "проверить карьерные сайты"),
         ("probe", "посмотреть сайт с сервера (админ)"),
         ("help", "справка"),
     ])
