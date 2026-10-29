@@ -1610,6 +1610,9 @@ TEXT_CAREERS = [
     ("Orion soft", "https://career.orionsoft.ru/vacancy"),
     ("Монетка", "https://career.monetka.ru/it/"),
     ("Ясно", "https://work.yasno.live/"),
+    # Utair IT: имя домена записано в punycode, httpx с кириллицей в адресе
+    # работает хуже
+    ("Utair IT", "https://xn----ptbb2aie6eg.xn--p1ai/vacancies"),
 ]
 TEXT_NODE = re.compile(r">([^<>]{4,120})<")
 
@@ -1626,6 +1629,31 @@ def _visible_lines(text):
     return out
 
 
+_SECTION_NAMES = {"аналитика", "разработка", "маркетинг", "дизайн",
+                  "тестирование", "поддержка", "данные", "продукт",
+                  "вакансии", "карьера", "стажировки", "обучение"}
+
+
+def _looks_like_title(line):
+    """Похоже ли на название вакансии, а не на строку описания.
+
+    На странице без карточек рядом с названиями лежат пункты обязанностей:
+    «разработка и сопровождение отчётности» фильтр пропускал как вакансию.
+    Название короткое, начинается с заглавной буквы и не содержит ни точки
+    с запятой, ни запятой с союзом.
+    """
+    if not 5 < len(line) <= 70:
+        return False
+    if ";" in line or line.endswith((".", ":")):
+        return False
+    head = line.lstrip("#•- ")[:1]
+    if not (head.isupper() or head.isdigit()):
+        return False
+    # «Аналитика» одним словом - это название раздела, а не вакансии;
+    # «Аналитик» одним словом - настоящая вакансия, такие есть у Монетки.
+    return line.strip().lower() not in _SECTION_NAMES
+
+
 async def fetch_text_careers(client):
     out = []
     for company, url in TEXT_CAREERS:
@@ -1640,6 +1668,8 @@ async def fetch_text_careers(client):
 
         found = 0
         for line in _visible_lines(resp.text):
+            if not _looks_like_title(line):
+                continue
             # Отдельных адресов у вакансий нет, поэтому мусор отсечь больше
             # нечем - сразу спрашиваем фильтр профиля.
             if not matching.classify(line):

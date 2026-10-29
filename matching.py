@@ -54,6 +54,10 @@ def variants(text):
     """
     text = (text or "").translate(TYPOGRAPHY)
     out = [text]
+    # «Ведущий бизнес - аналитик» - тот же бизнес-аналитик, но мимо шаблонов
+    squeezed = re.sub(r"(?<=\w)\s+-\s+(?=\w)", "-", text)
+    if squeezed != text:
+        out.append(squeezed)
     for swapped in (text.translate(HOMOGLYPHS), text.translate(CYRILLIC_BACK)):
         if swapped not in out:
             out.append(swapped)
