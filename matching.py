@@ -97,6 +97,11 @@ STOP_PATTERNS = _c([
     r"клиническ", r"доклиническ", r"clinical", r"провизор",
     r"долголети", r"исследован\w*\s+стабильност", r"биоэконом",
     r"reverse\s*engineer", r"research\s+engineer", r"computer\s+vision",
+    # «Operations Research» - это матметоды и оптимизация, слово research тут
+    # про исследование операций, а не про пользователей или рынок.
+    r"operations?\s+research", r"исследован\w*\s+операц",
+    r"исследовател\w*\s+операц", r"optimization\s*analy",
+    r"operations?\s+research\s+(?:specialist|analyst|scientist)",
     r"радиолог", r"рентген", r"\bврач\b", r"фельдшер",
     r"криминалист", r"судебн\w*\s+эксперт", r"полиграфолог",
     r"испытател", r"инженер[-\s]?исследовател", r"конструктор",
