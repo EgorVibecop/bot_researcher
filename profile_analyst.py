@@ -127,6 +127,11 @@ CATEGORIES = {
         r"data\s*scien", r"scientist", r"\bds\b", r"machine\s*learning",
         r"\bml\b", r"\bmlops\b", r"нейросет", r"computer\s+vision",
         r"\bnlp\b", r"рекомендательн\w+\s+систем",
+        # Оптимизация и исследование операций - тоже матмодели, не отчётность:
+        # «Middle Optimization Analyst / Operations Research Specialist».
+        r"optimization\s*analy", r"operations?\s+research",
+        r"исследован\w+\s+операц", r"оптимизацион\w+\s+(?:модел|задач)",
+        r"математическ\w+\s+(?:модел|оптимизац)", r"\bor[-\s]?специалист",
     ]),
     "system": ("🔧", "Системный", [
         r"систем\w*\s*[-/]?\s*(?:[\w/]+[-\s]\s*){0,2}аналитик",
