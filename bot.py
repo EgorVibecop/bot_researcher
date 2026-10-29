@@ -1096,6 +1096,7 @@ _SITE_ALIASES = {
     "2ГИС": "2gis",
     "Dodo Brands": "dodo",
     "Aviasales": "aviasales",
+    "AliExpress Tech": "aliexpress",
 }
 _FAILED = re.compile(r"не откры|не ответил|не удал")
 
@@ -1122,6 +1123,7 @@ async def career_report():
                 search.fetch_careers(client), search.fetch_text_careers(client),
                 search.fetch_magnit(client), search.fetch_skyeng(client),
                 search.fetch_mtslink(client), search.fetch_avito(client),
+                search.fetch_aliexpress(client),
                 search.fetch_2gis(client), search.fetch_dodo(client),
                 search.fetch_aviasales(client), return_exceptions=True)
     finally:
@@ -1137,7 +1139,7 @@ async def career_report():
                  + [c for c, _ in search.TEXT_CAREERS]
                  # у этих компаний свои сборщики, а не общий разбор страницы
                  + ["Магнит Tech", "Skyeng", "МТС Линк", "Авито", "2ГИС",
-                    "Dodo Brands", "Aviasales"]):
+                    "Dodo Brands", "Aviasales", "AliExpress Tech"]):
         if name not in expected:
             expected.append(name)
 

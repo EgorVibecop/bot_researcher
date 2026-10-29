@@ -1697,6 +1697,76 @@ async def fetch_text_careers(client):
     return out
 
 
+# ------------------------------------------------------- AliExpress Tech
+
+# it.aliexpress.ru - лендинг на Next.js: в разметке только текст о команде,
+# список вакансий страница просит у своего же HR-API. Адрес и имена
+# параметров взяты из её собственного скрипта (v1/vacancy/query), пробовать
+# другие хосты и угадывать пути я не стал.
+ALI_API = "https://aero.aliexpress-inc.ru/v1/vacancy/query"
+ALI_PAGE = "https://it.aliexpress.ru/"
+ALI_VACANCY = "https://it.aliexpress.ru/vacancy/"
+
+
+def _json_titles(node, found=None):
+    """Собирает из ответа API объекты, похожие на вакансии.
+
+    Структуру ответа заранее не знаем (хост доступен только из России),
+    поэтому обходим дерево и берём словари, у которых есть название.
+    """
+    found = [] if found is None else found
+    if isinstance(node, dict):
+        title = node.get("title") or node.get("name") or node.get("vacancyName")
+        if isinstance(title, str) and 4 < len(title) < 160:
+            found.append(node)
+        for value in node.values():
+            _json_titles(value, found)
+    elif isinstance(node, list):
+        for value in node:
+            _json_titles(value, found)
+    return found
+
+
+async def fetch_aliexpress(client):
+    try:
+        resp = await client.post(
+            ALI_API, timeout=20,
+            json={"pageSize": 100, "pageNumber": 1},
+            headers={"User-Agent": UA, "Accept": "application/json",
+                     "Referer": ALI_PAGE, "Origin": ALI_PAGE.rstrip("/")})
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.info("aliexpress: не ответил: %s %s", type(exc).__name__, exc)
+        return []
+
+    out = []
+    for raw in _json_titles(data):
+        title = (raw.get("title") or raw.get("name")
+                 or raw.get("vacancyName") or "").strip()
+        vid = str(raw.get("id") or raw.get("vacancyId") or "")
+        if not title:
+            continue
+        url = ALI_VACANCY + vid if vid else ALI_PAGE
+        out.append({
+            "uid": "ali:" + (vid or hashlib.md5(title.encode()).hexdigest()[:12]),
+            "source": "careers",
+            "ext_id": vid or hashlib.md5(title.encode()).hexdigest()[:12],
+            "title": title,
+            "company": "AliExpress Tech",
+            "area": str(raw.get("city") or raw.get("location") or ""),
+            "url": url,
+            "published_at": None,
+            "salary_from": None,
+            "salary_to": None,
+            "currency": "RUR",
+            "work_format": str(raw.get("workType") or raw.get("format") or ""),
+            "experience": str(raw.get("workExperience") or ""),
+        })
+    logger.info("aliexpress: вакансий %s", len(out))
+    return out
+
+
 # --------------------------------------------------------------- МТС Линк
 
 # Сайт вакансий на Tilda, но список подтягивается из их же открытого JSON
@@ -2011,6 +2081,7 @@ async def fetch_all(sources, hh_queries, habr_queries, area=113, period=7,
             tasks.append(fetch_skyeng(client))
             tasks.append(fetch_text_careers(client))
             tasks.append(fetch_mtslink(client))
+            tasks.append(fetch_aliexpress(client))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen, out = {}, []
