@@ -1143,12 +1143,27 @@ async def career_report():
         if name not in expected:
             expected.append(name)
 
+    # У текстовых страниц нет карточек с адресами, поэтому в cards попадают
+    # только прошедшие фильтр - иначе «карточек» всегда равнялось бы «по теме».
+    text_seen = search.TEXT_CAREER_SEEN
+
     lines = []
     for name in expected:
-        if cards.get(name):
+        total = text_seen.get(name, cards.get(name, 0))
+        if total:
             mark = "✅" if topical.get(name) else "➖"
-            lines.append(mark + " " + name + " — карточек " + str(cards[name])
-                         + ", по теме " + str(topical.get(name, 0)))
+            # У текстовых страниц это не карточки, а строки-кандидаты:
+            # среди них и названия вакансий, и пункты меню.
+            what = " — строк " if name in text_seen else " — карточек "
+            row = (mark + " " + name + what + str(total)
+                   + ", по теме " + str(topical.get(name, 0)))
+            # Если сайт сам пишет, что вакансий у него заметно больше, чем
+            # мы разобрали, список докручивается скриптом - значит теряем.
+            seen_cards, claimed = search.CAREER_CLAIMED.get(name, (0, 0))
+            if claimed >= max(seen_cards * 2, seen_cards + 5):
+                row = ("⚠️" + row[1:] + " — сайт заявляет "
+                       + str(claimed) + ", видим не всё")
+            lines.append(row)
         elif _site_failed(name, catcher.lines):
             lines.append("❌ " + name + " — не открылся с сервера")
         else:

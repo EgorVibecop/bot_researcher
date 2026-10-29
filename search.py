@@ -1661,6 +1661,13 @@ def _looks_like_title(line):
     return line.strip().lower() not in _SECTION_NAMES
 
 
+# Сколько похожих на вакансию строк нашлось на каждой текстовой странице
+# за последний обход. Нужно отчёту /sites: карточек с отдельными
+# адресами тут нет, и без этого числа «карточек» равнялось бы «по теме»,
+# то есть отчёт не показывал бы, читается ли страница целиком.
+TEXT_CAREER_SEEN = {}
+
+
 async def fetch_text_careers(client):
     out = []
     for company, url in TEXT_CAREERS:
@@ -1673,10 +1680,11 @@ async def fetch_text_careers(client):
                         company, type(exc).__name__, exc)
             continue
 
-        found = 0
+        found = seen = 0
         for line in _visible_lines(resp.text):
             if not _looks_like_title(line):
                 continue
+            seen += 1
             # Отдельных адресов у вакансий нет, поэтому мусор отсечь больше
             # нечем - сразу спрашиваем фильтр профиля.
             if not matching.classify(line):
@@ -1698,7 +1706,9 @@ async def fetch_text_careers(client):
                 "work_format": "",
                 "experience": "",
             })
-        logger.info("careers %s: по теме %s", company, found)
+        TEXT_CAREER_SEEN[company] = seen
+        logger.info("careers %s: заголовков %s, по теме %s",
+                    company, seen, found)
     return out
 
 
@@ -1911,6 +1921,31 @@ CAREER_SEARCH = [
     ("СДЭК", "https://rabota.cdek.ru/vacancies?query={q}"),
 ]
 
+# Сколько вакансий страница заявляет у себя сама: «37 вакансий»,
+# «Найдено 37», total в её JSON. Нужно, чтобы поймать молчаливую потерю:
+# если сайт пишет про 60 вакансий, а карточек разобралось 8, значит список
+# докручивается скриптом и мы видим только первый экран.
+CLAIM_PATTERNS = [
+    re.compile(r"(\d{1,4})\s*ваканс", re.I),
+    re.compile(r"найдено[^\d]{0,12}(\d{1,4})", re.I),
+    re.compile(r'"total(?:Count|Items|Vacancies)?"\s*:\s*(\d{1,4})', re.I),
+]
+# Сколько карточек и сколько заявлено - по компаниям за последний обход.
+CAREER_CLAIMED = {}
+
+
+def _claimed_total(text):
+    """Наибольшее правдоподобное число вакансий, названное самой страницей."""
+    found = set()
+    for pattern in CLAIM_PATTERNS:
+        for raw in pattern.findall(text):
+            number = int(raw)
+            # Однозначные числа и маркетинговые «более 5000» только мешают
+            if 2 < number < 2000:
+                found.add(number)
+    return max(found) if found else 0
+
+
 LD_BLOCK = re.compile(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', re.S | re.I)
 # Ссылка именно на карточку вакансии, а не на раздел: после vacancy/job
 # должен быть ещё один кусок пути - идентификатор.
@@ -1951,13 +1986,18 @@ def _page_links(text, base):
     from urllib.parse import urljoin
 
     out, seen = [], set()
-    for href, inner in CAREER_LINK.findall(text):
+    for match in CAREER_LINK.finditer(text):
+        href, inner = match.group(1), match.group(2)
         # Внутри карточки название обычно в заголовке, а рядом - зарплата,
         # город, опыт и график. Берём заголовок, если он есть.
         head = CARD_HEADING.search(inner)
-        title = _strip_tags(head.group(1) if head else inner)
-        title = CARD_TAIL.sub("", title).strip(" ,·|-")
-        if not (5 < len(title) < 90) or title.lower() in _CAREER_NOISE:
+        title = _clean_card_title(head.group(1) if head else inner)
+        if not title:
+            # У Selectel и подобных ссылка - это кнопка «Подробнее», а
+            # название вакансии лежит перед ней, вне ссылки. Раньше такие
+            # карточки отбрасывались целиком: 4 из 28 вместо всех.
+            title = _title_before(text, match.start())
+        if not title:
             continue
         url = urljoin(base, href)
         if url in seen:
@@ -1967,7 +2007,36 @@ def _page_links(text, base):
     return out
 
 
+def _clean_card_title(raw):
+    """Чистит название из куска разметки; пусто - значит не название."""
+    title = CARD_TAIL.sub("", _strip_tags(raw)).strip(" ,·|-")
+    if not (5 < len(title) < 90) or title.lower() in _CAREER_NOISE:
+        return ""
+    return title
+
+
+def _title_before(text, pos):
+    """Ищет название вакансии в разметке перед ссылкой-кнопкой.
+
+    Берём ближайший к ссылке заголовок или элемент с «title» в классе -
+    в карточке он стоит сразу над кнопкой.
+    """
+    window = text[max(0, pos - 1500):pos]
+    found = []
+    for pattern in (CARD_HEADING, CARD_TITLE_CLASS):
+        for match in pattern.finditer(window):
+            title = _clean_card_title(match.group(1))
+            if title:
+                found.append((match.start(), title))
+    # Ближайшее к ссылке, то есть последнее по разметке
+    return max(found)[1] if found else ""
+
+
 CARD_HEADING = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.S | re.IGNORECASE)
+# Название карточки без заголовка: <div class="...__title ...">Название</div>
+CARD_TITLE_CLASS = re.compile(
+    r'<(?:div|span|p)[^>]+class="[^"]*(?:title|name|heading)[^"]*"[^>]*>(.*?)</(?:div|span|p)>',
+    re.S | re.IGNORECASE)
 # Хвост карточки: зарплата, город, опыт, график - всё, что идёт после
 # названия одной строкой.
 CARD_TAIL = re.compile(
@@ -2027,7 +2096,14 @@ async def fetch_careers(client):
                 "work_format": "",
                 "experience": "",
             })
-        logger.info("careers %s: карточек %s", company, len(found))
+        claimed = _claimed_total(resp.text)
+        known = CAREER_CLAIMED.get(company, (0, 0))
+        # У VK, Яндекса и СДЭКа несколько страниц за обход (поиск по
+        # запросам): берём лучший результат, а не последний.
+        CAREER_CLAIMED[company] = (max(known[0], len(found)),
+                                   max(known[1], claimed))
+        logger.info("careers %s: карточек %s, страница заявляет %s",
+                    company, len(found), claimed)
     return out
 
 
