@@ -319,6 +319,25 @@ def queue_reasons(st):
     return ", ".join(parts) or "ничего"
 
 
+def queue_warning(st, queue_len):
+    """Предупреждение, если очередь не успевает разойтись за окно поиска.
+
+    Лента отдаёт max_per_run вакансий за проверку, а вакансия живёт в
+    очереди только SEARCH_PERIOD_DAYS суток: что не успело уйти, выпадает
+    из окна и не приходит никогда. По одной цифре очереди этого не видно.
+    """
+    per_run = int(st.get("max_per_run") or 0)
+    runs_a_day = 24 * 60 // CHECK_INTERVAL_MINUTES
+    if not per_run or not runs_a_day:
+        return ""
+    if queue_len <= per_run * runs_a_day * SEARCH_PERIOD_DAYS:
+        return ""
+    days = round(queue_len / (per_run * runs_a_day), 1)
+    return (" ⚠️ при " + str(per_run) + " за проверку это "
+            + str(days) + " дней, а окно " + str(SEARCH_PERIOD_DAYS)
+            + ": хвост выпадет. Подними «сколько присылать» в фильтре")
+
+
 def pick_for_user(st, limit=None):
     includes, excludes, muted = user_filters(st["user_id"])
     # окно ленты совпадает с окном сбора, иначе часть собранного
@@ -805,13 +824,15 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Поимённо: по общей цифре «карьерные сайты» не видно, какой сайт молчит.
     by_company = ", ".join(
         name + " " + str(count) for name, count in s["by_company"][:15]) or "—"
+    queue_now = len(pick_for_user(st))
     await update.message.reply_text(
         "📊 <b>Статистика</b>\n\n"
         "Отправлено за неделю: <b>" + str(s["sent_week"]) + "</b>\n"
         "Отправлено всего: " + str(s["sent_total"]) + "\n"
         "Подходящих вакансий в базе: " + str(s["in_base"]) + "\n"
         "Появилось за сутки: " + str(s["fresh_day"]) + "\n"
-        "В очереди именно вам: <b>" + str(len(pick_for_user(st))) + "</b>\n"
+        "В очереди именно вам: <b>" + str(queue_now) + "</b>"
+        + queue_warning(st, queue_now) + "\n"
         + "Отсеяно фильтром: " + queue_reasons(st) + "\n"
         + ("Последняя проверка: " + LAST_CYCLE["at"] + ", собрано " +
            str(LAST_CYCLE["collected"]) + ", из них новых " +

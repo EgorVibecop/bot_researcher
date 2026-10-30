@@ -342,16 +342,22 @@ def all_users_count():
 # Сайты самих компаний: их ссылка важнее ссылки агрегатора.
 OWN_SITE_SOURCES = {"careers", "magnit", "avito", "2gis", "dodo", "aviasales", "itone"}
 
+# Источники, где присутствие вакансии в выдаче - достоверный признак, что
+# она открыта: каталоги компаний и агрегаторы с полным списком. Если такая
+# вакансия снова пришла, метку «снята с публикации» снимаем.
+CATALOG_SOURCES = OWN_SITE_SOURCES | {"getmatch", "hh", "habr", "zarplata",
+                                      "rabota", "trudvsem", "geekjob"}
+
 
 def upsert_vacancies(items):
     """Записывает вакансии, возвращает список тех, которых раньше не было."""
     conn = get_conn()
     stamp = now().isoformat(timespec="seconds")
     recent = (now() - timedelta(days=14)).isoformat(timespec="seconds")
-    fresh = []
+    fresh, revived = [], 0
     for v in items:
         exists = conn.execute(
-            "SELECT relevant, categories FROM vacancies WHERE uid = ?",
+            "SELECT relevant, categories, closed FROM vacancies WHERE uid = ?",
             (v["uid"],)).fetchone()
         if exists:
             # Фильтр со временем умнеет, а вердикт у старых записей остаётся
@@ -364,6 +370,13 @@ def upsert_vacancies(items):
                 conn.execute(
                     "UPDATE vacancies SET relevant = ?, categories = ? WHERE uid = ?",
                     (1 if now_relevant else 0, cats, v["uid"]))
+            # Вакансия снова в выдаче, значит открыта. Без этого любое
+            # ложное закрытие - сайт моргнул и отдал полкаталога - означало
+            # потерю навсегда: closed = 1 никто не снимал.
+            if exists["closed"] and v.get("source") in CATALOG_SOURCES:
+                conn.execute("UPDATE vacancies SET closed = 0 WHERE uid = ?",
+                             (v["uid"],))
+                revived += 1
             continue
         # один и тот же текст вакансии часто висит несколькими объявлениями;
         # у удалёнки её ещё и размножают по городам - там город игнорируем
@@ -400,6 +413,9 @@ def upsert_vacancies(items):
         fresh.append(v)
     conn.commit()
     conn.close()
+    if revived:
+        logging.getLogger(__name__).info(
+            "вернулось в ленту вакансий: %s", revived)
     return fresh
 
 
@@ -446,11 +462,28 @@ def close_missing(source, alive_uids):
     Авито, 2ГИС, Dodo, Aviasales). Для поисковых выдач вроде hh так делать
     нельзя: там вакансия выпадает из ответа просто потому, что не подошла
     под запрос или вышла из окна поиска.
+
+    Если выдача оказалась заметно короче того, что мы о ней знаем, значит
+    обход оборвался - тогда не закрываем ничего. Каталог, который правда
+    сократился, разойдётся сам: перед отправкой каждую вакансию проверяем
+    по её странице.
     """
     if not alive_uids:
         return 0
     conn = get_conn()
     alive = list(alive_uids)
+    known = conn.execute(
+        "SELECT COUNT(*) c FROM vacancies WHERE source = ? AND IFNULL(closed, 0) = 0",
+        (source,)).fetchone()["c"]
+    # Обход мог оборваться на середине: одна страница из пяти ответила,
+    # остальные упали по таймауту. Тогда «пропавшее» - это не снятые
+    # вакансии, а наша недоработка, и закрывать их нельзя.
+    if known and len(alive) < known * 0.6:
+        conn.close()
+        logging.getLogger(__name__).warning(
+            "%s: обход неполный (%s из %s), ничего не закрываю",
+            source, len(alive), known)
+        return 0
     marks = ",".join("?" * len(alive))
     cur = conn.execute(
         "UPDATE vacancies SET closed = 1 WHERE source = ? AND IFNULL(closed, 0) = 0"
@@ -871,7 +904,11 @@ def match_reason(vac, st, includes, excludes, muted):
         return "не про российский рынок"
 
     region = st.get("region") or "any"
-    if region in MSK_CITY and not formats & {"remote", "remote_maybe"}:
+    # Город знают не все источники: карьерные сайты, телеграм и IT-One его
+    # не публикуют. Пустое поле - это «неизвестно», а не «другой город»,
+    # иначе у человека с фильтром «Москва» пропадали все вакансии с сайтов
+    # компаний - то есть самое ценное.
+    if region in MSK_CITY and area and not formats & {"remote", "remote_maybe"}:
         if not any(city in area for city in MSK_CITY[region]):
             return "регион"
 

@@ -76,14 +76,26 @@ GETMATCH_PAGES = int(os.getenv("GETMATCH_PAGES", "5"))
 
 
 async def _hh_get(client, url, params, headers):
-    """Запрос к hh с очередью и одной повторной попыткой после 429."""
-    for attempt in range(2):
-        async with HH_LIMIT:
-            resp = await client.get(url, params=params, headers=headers)
-            await asyncio.sleep(HH_PAUSE)
-        if resp.status_code == 429 and attempt == 0:
-            logger.info("hh просит подождать, повторю через 5 секунд")
-            await asyncio.sleep(5)
+    """Запрос к hh с очередью и повторами.
+
+    Повторяем не только 429, но и сетевой сбой с ответами 5xx: сбой на
+    третьей странице обрывал обход запроса целиком, и всё, что лежало
+    дальше, в этот цикл не попадало.
+    """
+    for attempt in range(3):
+        try:
+            async with HH_LIMIT:
+                resp = await client.get(url, params=params, headers=headers)
+                await asyncio.sleep(HH_PAUSE)
+        except Exception as exc:
+            if attempt == 2:
+                raise
+            logger.info("hh: сбой связи (%s), повторю", type(exc).__name__)
+            await asyncio.sleep(3)
+            continue
+        if attempt < 2 and (resp.status_code == 429 or resp.status_code >= 500):
+            logger.info("hh ответил %s, повторю", resp.status_code)
+            await asyncio.sleep(5 if resp.status_code == 429 else 3)
             continue
         resp.raise_for_status()
         return resp
@@ -518,9 +530,41 @@ CLOSED_MARKERS = re.compile(
     re.IGNORECASE)
 
 
+async def _hh_archived(client, vac):
+    """Спрашивает у API hh, в архиве ли вакансия: True/False, None - не знаю.
+
+    Точнее, чем поиск слов на странице: hh отвечает хостингу то 403, то
+    капчей, и тогда проверка по тексту считала живыми уже снятые вакансии.
+    """
+    if vac.get("source") != "hh":
+        return None
+    ext = str(vac.get("ext_id") or "")
+    if not ext.isdigit():
+        return None
+    headers = {"User-Agent": "JobRadar/1.0"}
+    if HH_TOKEN:
+        headers["Authorization"] = "Bearer " + HH_TOKEN
+    try:
+        resp = await client.get("https://api.hh.ru/vacancies/" + ext,
+                                headers=headers, timeout=15)
+    except Exception:
+        return None
+    if resp.status_code in (404, 410):
+        return True
+    if resp.status_code != 200:
+        return None
+    try:
+        return bool(resp.json().get("archived"))
+    except Exception:
+        return None
+
+
 async def is_alive(client, vac):
     """Открыта ли ещё вакансия. При любой неясности считаем, что открыта:
     лучше показать лишнее, чем молча проглотить живую вакансию."""
+    archived = await _hh_archived(client, vac)
+    if archived is not None:
+        return not archived
     url = vac.get("url")
     if not url:
         return True
