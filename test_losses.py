@@ -88,6 +88,27 @@ def test_hh_alive_is_conservative():
     assert alive is True, "сетевая ошибка приняли за закрытую вакансию"
 
 
+def test_queue_capacity_counts_quiet_hours():
+    """Запас очереди считается по реальному числу отправок, не по 24 в сутки.
+
+    Ночью бот молчит (23:00-08:00), в дайджесте отправка одна в сутки.
+    Раньше запас выходил втрое больше настоящего, и предупреждение
+    о выпадающем хвосте не срабатывало там, где потеря уже шла.
+    """
+    import bot
+    instant = {"max_per_run": 8, "quiet_start": 23, "quiet_end": 8,
+               "mode": "instant"}
+    digest = {"max_per_run": 5, "quiet_start": 23, "quiet_end": 8,
+              "mode": "digest"}
+    assert bot.runs_a_day(instant) == 15, "тихие часы не учтены"
+    assert bot.runs_a_day(digest) == 1, "дайджест - одна отправка в сутки"
+    # 8 x 15 x 21 = 2520: столько очередь успевает разослать за окно
+    assert bot.queue_warning(instant, 2000) == ""
+    assert "хвост выпадет" in bot.queue_warning(instant, 3000)
+    # в дайджесте запас всего 5 x 21 = 105
+    assert "хвост выпадет" in bot.queue_warning(digest, 200)
+
+
 class FakeResp:
     def __init__(self, status=200, payload=None, text=""):
         self.status_code = status

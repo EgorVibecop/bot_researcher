@@ -319,6 +319,23 @@ def queue_reasons(st):
     return ", ".join(parts) or "ничего"
 
 
+def runs_a_day(st):
+    """Сколько раз за сутки лента реально отдаёт порцию.
+
+    Не 24: ночью бот молчит (тихие часы), а в режиме дайджеста отправка
+    вообще одна в сутки. Без этого запас по очереди считался втрое больше
+    настоящего.
+    """
+    if st.get("mode") == "digest":
+        return 1
+    start, end = int(st.get("quiet_start", 23)), int(st.get("quiet_end", 8))
+    quiet = sum(1 for hour in range(24)
+                if ((start <= hour or hour < end) if start > end
+                    else (start <= hour < end)))
+    per_hour = max(1, 60 // max(1, CHECK_INTERVAL_MINUTES))
+    return (24 - quiet) * per_hour
+
+
 def queue_warning(st, queue_len):
     """Предупреждение, если очередь не успевает разойтись за окно поиска.
 
@@ -327,14 +344,16 @@ def queue_warning(st, queue_len):
     из окна и не приходит никогда. По одной цифре очереди этого не видно.
     """
     per_run = int(st.get("max_per_run") or 0)
-    runs_a_day = 24 * 60 // CHECK_INTERVAL_MINUTES
-    if not per_run or not runs_a_day:
+    runs = runs_a_day(st)
+    if not per_run or not runs:
         return ""
-    if queue_len <= per_run * runs_a_day * SEARCH_PERIOD_DAYS:
+    if queue_len <= per_run * runs * SEARCH_PERIOD_DAYS:
         return ""
-    days = round(queue_len / (per_run * runs_a_day), 1)
-    return (" ⚠️ при " + str(per_run) + " за проверку это "
-            + str(days) + " дней, а окно " + str(SEARCH_PERIOD_DAYS)
+    days = round(queue_len / (per_run * runs), 1)
+    how = ("дайджест раз в сутки" if st.get("mode") == "digest"
+           else str(per_run) + " за проверку, " + str(runs) + " раз в сутки")
+    return (" ⚠️ при " + how + " это " + str(days)
+            + " дней, а окно " + str(SEARCH_PERIOD_DAYS)
             + ": хвост выпадет. Подними «сколько присылать» в фильтре")
 
 
